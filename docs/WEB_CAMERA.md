@@ -42,6 +42,9 @@ engine.resetBackground();       // re-learn the empty room
 engine.objects;                 // [{id, label, zone, status, box}] current local memory
 engine.frameSize;               // [w, h] processing size (w = 640)
 engine.snapshotDataUrl();       // current frame as JPEG data URL (for the zone editor background)
+engine.highlight(objectId, ms); // pulse a "Here" ring around a remembered object on the live overlay
+engine.outlinedFrameDataUrl(objectId, box?); // current picture with that object circled (JPEG data URL)
+ICamEdge.drawSpotlight(ctx, [x, y, w, h], W, H, label, pulse = 1, px = 1); // same look on any canvas
 ```
 
 ## What `edge.js` must do (parity with `icamfind/edge`)

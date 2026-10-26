@@ -67,6 +67,9 @@
     timers: {},
     dialogReturnFocus: null,
     snapForce: false,
+    here: null, // "Here it is" picture for the current answer
+    drawerHere: null, // "Show me where" picture in the thing's detail sheet
+    detailObject: null,
   };
 
   // Browser camera (this computer watching the room).
@@ -573,6 +576,10 @@
   // Everything below the top bar belongs to one home; drop it before switching.
   function resetHouseholdState() {
     stopJob();
+    cancelHere(state.here);
+    cancelHere(state.drawerHere);
+    state.here = null;
+    state.drawerHere = null;
     state.job = null;
     state.steps = [];
     state.openSteps = new Set();
@@ -1657,6 +1664,8 @@
 
   async function openObject(id) {
     if (!id) return;
+    cancelHere(state.drawerHere);
+    state.drawerHere = null;
     const dialog = $("#object-dialog");
     const known = state.objects.find((o) => o.id === id);
     $("#dialog-title").textContent = known ? labelOf(known) : "Thing";
@@ -1673,6 +1682,7 @@
 
   function renderObjectDetail(o, events) {
     const name = labelOf(o);
+    state.detailObject = o;
     $("#dialog-title").textContent = name;
     const img = stableUrl(o.crop_url);
     const rows = [
@@ -1690,6 +1700,10 @@
         ${img ? `<img src="${esc(img)}" alt="Photo of ${esc(name)}">` : `<div class="obj-photo-empty" aria-hidden="true">No photo</div>`}
         <dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
       </div>
+      ${o.id && o.status !== "removed" ? `<p class="detail-actions"><button class="btn btn-small" type="button" data-action="where" data-id="${esc(o.id)}">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/></svg>
+        Show me where</button></p>
+      <div class="detail-where" hidden></div>` : ""}
       <h3 class="small-title">History</h3>
       ${history}`;
   }
@@ -1822,6 +1836,8 @@
   function startJob(id, label, target) {
     if (!id) { setAskBusy(false); toast("iCamFind couldn't start looking. Please try again."); return; }
     stopJob();
+    cancelHere(state.here);
+    state.here = null;
     state.jobTarget = target;
     state.job = { id, status: "running", question: label };
     state.steps = [];
@@ -1877,12 +1893,16 @@
     stopJob();
     setAskBusy(false);
     const job = state.job;
+    const refreshed = refreshState();
+    refreshEvents();
+    const herePromise = job && job.status === "done" ? startHereForJob(job, refreshed) : Promise.resolve(null);
     if (state.jobTarget === "ask" && job && job.status === "done" && job.answer && $("#auto-read").checked && !state.spokenJobs.has(job.id)) {
       state.spokenJobs.add(job.id);
-      speak(job.answer);
+      // Wait for the circled picture (at most 4 s) so the spoken answer can point to it.
+      const pictureReady = herePromise.then((v) => (v ? v.ready : false)).catch(() => false);
+      Promise.race([pictureReady, new Promise((r) => setTimeout(() => r(false), 4000))])
+        .then(() => { if (state.job && state.job.id === job.id) speak(spokenAnswer(job)); });
     }
-    refreshState();
-    refreshEvents();
   }
 
   function renderJob() {
@@ -1931,16 +1951,252 @@
     const obj = job.object_id ? state.objects.find((o) => o.id === job.object_id) : null;
     const img = obj ? stableUrl(obj.crop_url) : "";
     const meta = obj ? `${whereText(obj)} · seen ${relTime(obj.last_seen)} (${clock(obj.last_seen)})` : "";
-    card.className = `answer-card${img ? "" : " no-image"}`;
-    setHtml(card, `
-      ${img ? `<img src="${esc(img)}" alt="Photo of ${esc(labelOf(obj))}">` : ""}
-      <div>
+    const here = hereFor(job);
+    const showHere = !!(here && here.status !== "none");
+    const text = `<div>
         <p class="answer-text">${esc(job.answer)}</p>
         ${meta ? `<p class="answer-meta">${esc(meta)}</p>` : ""}
         ${obj ? `<p><button class="btn btn-small" type="button" data-action="open" data-id="${esc(obj.id)}" data-fkey="ans-open">See its history</button></p>` : ""}
-      </div>`);
+      </div>`;
+    if (showHere) {
+      card.className = "answer-card has-here";
+      setHtml(card, `
+        <div class="here-slot"></div>
+        <div class="answer-row${img ? "" : " no-inset"}">
+          ${img ? `<img class="answer-inset" src="${esc(img)}" alt="Close photo of ${esc(labelOf(obj))}">` : ""}
+          ${text}
+        </div>`);
+      // The picture lives in its own node (a canvas can't be rebuilt from HTML), so re-attach it after renders.
+      const slot = card.querySelector(".here-slot");
+      if (slot && here.el.parentNode !== slot) slot.appendChild(here.el);
+    } else {
+      card.className = `answer-card${img ? "" : " no-image"}`;
+      setHtml(card, `
+        ${img ? `<img src="${esc(img)}" alt="Photo of ${esc(labelOf(obj))}">` : ""}
+        ${text}`);
+    }
     card.hidden = false;
     if (tools) tools.hidden = !("speechSynthesis" in window);
+  }
+
+  function spokenAnswer(job) {
+    if (!job || !job.answer) return "";
+    const here = hereFor(job);
+    return here && here.status === "ready" ? `${job.answer} I've circled it on the camera picture.` : job.answer;
+  }
+
+  // ---------- "Here it is": the camera picture with the thing circled ----------
+
+  function reducedMotion() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+
+  function hereFor(job) {
+    return job && state.here && state.here.jobId === job.id ? state.here : null;
+  }
+
+  function cancelHere(view) {
+    if (!view) return;
+    view.cancelled = true;
+    try { view.stop(); } catch { /* animation already over */ }
+  }
+
+  function hereAlt(o) {
+    const z = zoneName(o.zone);
+    return `Camera picture with the ${labelOf(o)} circled${z ? ` on the ${z}` : ""}`;
+  }
+
+  // This browser's camera, if it is watching the current home and remembers the thing.
+  function liveEngineFor(o) {
+    const e = cam.engine;
+    if (!e || cam.paused || !camConfig() || cam.household !== state.household) return null;
+    try {
+      return Array.isArray(e.objects) && e.objects.some((x) => x.id === o.id) ? e : null;
+    } catch { return null; }
+  }
+
+  // The camera's own close-up from this answer's live check, when it actually saw the thing.
+  function closeUpUrl(steps) {
+    const s = (steps || []).slice().reverse().find((x) => x.kind === "tool_result" && x.image_url
+      && (x.tool === "verify_object_live" || x.tool === "scan_room_for_object")
+      && x.output && (x.output.present === true || x.output.found === true));
+    return s ? safeUrl(s.image_url) : "";
+  }
+
+  async function startHereForJob(job, refreshed) {
+    if (!job || !job.object_id || state.jobTarget !== "ask") return null;
+    try { await refreshed; } catch { /* use what we have */ }
+    if (!state.job || state.job.id !== job.id) return null;
+    const o = state.objects.find((x) => x.id === job.object_id);
+    if (!o || o.status === "removed") return null; // picked up: there is nothing to circle
+    cancelHere(state.here);
+    const view = createHereView(o, { closeUp: closeUpUrl(state.steps) });
+    view.jobId = job.id;
+    state.here = view;
+    renderAnswer();
+    view.ready.then(() => { if (state.here === view) renderAnswer(); });
+    return view;
+  }
+
+  function createHereView(o, opts = {}) {
+    const fig = document.createElement("figure");
+    fig.className = "here-view";
+    fig.innerHTML = `
+      <div class="here-pic"><p class="here-wait"><span class="spinner" aria-hidden="true"></span> Getting a fresh camera picture…</p></div>
+      <figcaption class="here-caption">
+        <span class="here-cap-text"></span>
+        <button class="btn btn-small here-show" type="button" hidden>Show on the camera</button>
+      </figcaption>
+      ${opts.closeUp ? `<div class="here-closeup"><img src="${esc(opts.closeUp)}" alt="Close-up of the ${esc(labelOf(o))} taken by the camera just now"><span>Close-up just now</span></div>` : ""}`;
+    const view = { el: fig, objectId: o.id, status: "pending", cancelled: false, stop: () => {} };
+    view.ready = fillHereView(view, o).catch(() => false).then((ok) => {
+      if (!view.cancelled) view.status = ok ? "ready" : "none";
+      return ok;
+    });
+    return view;
+  }
+
+  async function fillHereView(view, o) {
+    const pic = view.el.querySelector(".here-pic");
+    const cap = view.el.querySelector(".here-cap-text");
+    const alt = hereAlt(o);
+    const engine = liveEngineFor(o);
+    if (engine) {
+      let url = "";
+      try {
+        engine.highlight(o.id, 15000);
+        url = safeDataImage(engine.outlinedFrameDataUrl(o.id));
+      } catch { url = ""; }
+      if (url) {
+        pic.innerHTML = `<img src="${esc(url)}" alt="${esc(alt)}">`;
+        cap.textContent = "Live from this camera, just now";
+        const btn = view.el.querySelector(".here-show");
+        btn.hidden = false;
+        btn.addEventListener("click", () => {
+          try { engine.highlight(o.id, 15000); } catch { /* engine stopped */ }
+          closeDialog($("#object-dialog"));
+          go("camera");
+        });
+        return true;
+      }
+    }
+    return remoteHere(view, o, pic, cap, alt);
+  }
+
+  // Another camera (or the demo home): ask it for a fresh picture, then circle the thing on it.
+  async function remoteHere(view, o, pic, cap, alt) {
+    const bbox = Array.isArray(o.bbox) && o.bbox.length === 4 ? o.bbox.map(Number) : null;
+    const first = state.device;
+    if (!bbox || bbox.some((v) => !Number.isFinite(v)) || !first || (o.device && first.id !== o.device)) return false;
+    const hh = state.household;
+    const before = Number(first.snapshot_at) || 0;
+    let asked = false;
+    try {
+      await api("api/snapshot", { method: "POST", quiet: true });
+      asked = true;
+    } catch { /* camera offline: use its last picture */ }
+    const deadline = Date.now() + 8000;
+    while (asked && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1500));
+      if (view.cancelled || state.household !== hh) return false;
+      state.snapForce = true;
+      await refreshState();
+      if (state.device && (Number(state.device.snapshot_at) || 0) > before) break;
+    }
+    if (view.cancelled || state.household !== hh) return false;
+    const d = state.device;
+    const url = d ? safeUrl(d.snapshot_url) : "";
+    const fs = d && Array.isArray(d.frame_size) && d.frame_size.length === 2 ? d.frame_size.map(Number) : null;
+    if (!url || !fs || !(fs[0] > 0)) return false;
+    // The S3 picture has no CORS headers: drawing it is fine, but this canvas must never be read back.
+    const img = new Image();
+    img.decoding = "async";
+    try {
+      await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = url; });
+    } catch { return false; }
+    if (view.cancelled) return false;
+    const W = img.naturalWidth;
+    const H = img.naturalHeight;
+    if (!W || !H) return false;
+    const s = W / fs[0];
+    const box = bbox.map((v) => v * s);
+    const px = Math.max(1, s);
+    const label = labelOf(o);
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute("aria-label", alt);
+    const ctx = canvas.getContext("2d");
+    const draw = (pulse) => {
+      ctx.drawImage(img, 0, 0, W, H);
+      if (window.ICamEdge && typeof window.ICamEdge.drawSpotlight === "function") {
+        window.ICamEdge.drawSpotlight(ctx, box, W, H, label, pulse, px);
+      } else {
+        drawRing(ctx, box, W, H, label, pulse, px);
+      }
+    };
+    draw(1);
+    pic.innerHTML = "";
+    pic.appendChild(canvas);
+    const when = d.snapshot_at ? relTime(d.snapshot_at) : "";
+    cap.textContent = when ? `Camera picture from ${when}` : "Latest camera picture";
+    if (!reducedMotion()) {
+      const until = performance.now() + 12000;
+      let raf = 0;
+      const tick = (t) => {
+        if (view.cancelled || t > until) { draw(1); return; }
+        draw(0.5 + 0.5 * Math.sin(t / 180));
+        raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+      view.stop = () => cancelAnimationFrame(raf);
+    }
+    return true;
+  }
+
+  // Fallback when the camera module isn't loaded: a plain yellow ring and a "Here" tag.
+  function drawRing(ctx, box, W, H, label, pulse, px) {
+    const [x, y, w, h] = box;
+    const r = Math.hypot(w, h) / 2 + Math.max(8 * px, 0.25 * Math.max(w, h));
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    ctx.save();
+    ctx.lineWidth = (3 + 3 * pulse) * px;
+    ctx.strokeStyle = "#facc15";
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    const text = label ? `Here: ${label}` : "Here";
+    ctx.font = `bold ${Math.round(15 * px)}px system-ui, sans-serif`;
+    const tw = ctx.measureText(text).width + 12 * px;
+    const tx = Math.min(W - tw, Math.max(0, cx - tw / 2));
+    const ty = Math.max(20 * px, cy - r - 10 * px);
+    ctx.fillStyle = "#facc15";
+    ctx.fillRect(tx, ty - 18 * px, tw, 24 * px);
+    ctx.fillStyle = "#111";
+    ctx.fillText(text, tx + 6 * px, ty);
+    ctx.restore();
+  }
+
+  function showWhereInDrawer(button) {
+    const id = button.getAttribute("data-id");
+    const o = state.objects.find((x) => x.id === id) || (state.detailObject && state.detailObject.id === id ? state.detailObject : null);
+    const slot = $("#dialog-body .detail-where");
+    if (!o || !slot) return;
+    cancelHere(state.drawerHere);
+    const view = createHereView(o);
+    state.drawerHere = view;
+    slot.hidden = false;
+    slot.innerHTML = "";
+    slot.appendChild(view.el);
+    button.disabled = true;
+    view.ready.then((ok) => {
+      button.disabled = false;
+      if (!ok && state.drawerHere === view && view.el.parentNode === slot) {
+        slot.innerHTML = `<p class="muted">There's no camera picture of this right now.</p>`;
+      }
+    });
   }
 
   // Pair each tool_call with the tool_result that follows it so the trace reads as one step per action.
@@ -2171,7 +2427,12 @@
     $$(".chip[data-q]").forEach((chip) => {
       chip.addEventListener("click", () => ask(chip.getAttribute("data-q")));
     });
-    $("#read-aloud-btn").addEventListener("click", () => { if (state.job) speak(state.job.answer); });
+    $("#read-aloud-btn").addEventListener("click", () => { if (state.job) speak(spokenAnswer(state.job)); });
+    $("#dialog-body").addEventListener("click", (e) => {
+      const b = e.target.closest('[data-action="where"]');
+      if (b) showWhereInDrawer(b);
+    });
+    $("#object-dialog").addEventListener("close", () => { cancelHere(state.drawerHere); state.drawerHere = null; });
 
     // Remember which trace steps were expanded across re-renders (toggle does not bubble).
     [$("#trace-list"), $("#jd-trace")].forEach((list) => {

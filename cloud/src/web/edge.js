@@ -1241,7 +1241,9 @@
       if (!this.core) {
         const geometry = new RoomGeometry(cv, this.opts.zones, this.opts.doorZone);
         this.core = new SceneMemory(cv, { essentials: this.opts.essentials, placesOnly: this.opts.placesOnly,
-          maxObjectArea: this.opts.placesOnly ? 0.25 : 0.12 }, geometry);
+          maxObjectArea: this.opts.placesOnly ? 0.25 : 0.12,
+          // Inside drawn places small things (spoon, lighter, USB stick) are allowed: about 115 px at 640x360.
+          minObjectArea: this.opts.placesOnly ? 0.0005 : 0.0012 }, geometry);
         await this._restore();
       }
       this._capture = document.createElement("canvas");
@@ -1282,6 +1284,29 @@
 
     snapshotDataUrl() {
       return this.lastFrameUrl;
+    }
+
+    /** Pulse an outline around a remembered object on the live overlay for `ms` milliseconds. */
+    highlight(objectId, ms = 12000) {
+      this._highlight = objectId ? { id: objectId, until: performance.now() + ms } : null;
+    }
+
+    /**
+     * Current camera picture with one object (or box) outlined, as a JPEG data URL - for "Here it is" views.
+     * `box` is [x, y, w, h] in processing coordinates; defaults to the remembered object's box.
+     */
+    outlinedFrameDataUrl(objectId, box = null) {
+      const src = this._capture;
+      if (!src || !src.width) return null;
+      const obj = objectId && this.core ? this.core.objects.get(objectId) : null;
+      const b = box || (obj ? obj.box : null);
+      const c = document.createElement("canvas");
+      c.width = src.width;
+      c.height = src.height;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(src, 0, 0);
+      if (b) drawSpotlight(ctx, b, c.width, c.height, obj ? obj.label : "", 1);
+      return c.toDataURL("image/jpeg", 0.85);
     }
 
     // ------------------------------------------------------------------ frame loop
@@ -1594,8 +1619,9 @@
       ctx.strokeStyle = "#facc15";
       for (const [x, y, w, h] of this.core.settlingBoxes()) ctx.strokeRect(x * sx, y * sy, w * sx, h * sy);
       ctx.setLineDash([]);
+      const spotlit = this._highlight && performance.now() < this._highlight.until ? this._highlight.id : null;
       for (const o of this.core.objects.values()) {
-        if (o.status !== "present") continue;
+        if (o.status !== "present" || o.id === spotlit) continue;
         const [x, y, w, h] = o.box;
         ctx.strokeStyle = o.essential ? "#fbbf24" : "#4ade80";
         ctx.strokeRect(x * sx, y * sy, w * sx, h * sy);
@@ -1606,12 +1632,57 @@
         ctx.fillStyle = "#fff";
         ctx.fillText(label, x * sx + 4 * dpr, y * sy - 5 * dpr);
       }
+      // "Here it is": dim the rest of the picture and pulse a ring around the object the user asked about.
+      const hl = this._highlight;
+      if (hl && performance.now() < hl.until) {
+        const o = this.core.objects.get(hl.id);
+        if (o) {
+          const [x, y, w, h] = o.box;
+          const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180);
+          ctx.save();
+          ctx.scale(sx, sy);
+          drawSpotlight(ctx, [x, y, w, h], W, H, o.label, pulse, dpr / Math.min(sx, sy));
+          ctx.restore();
+        }
+      } else if (hl) {
+        this._highlight = null;
+      }
     }
+  }
+
+  /** Darken everything except box [x,y,w,h], ring it, and tag it "Here". Coordinates in frame pixels. */
+  function drawSpotlight(ctx, box, W, H, label, pulse = 1, px = 1) {
+    const [x, y, w, h] = box;
+    const pad = Math.max(8, 0.25 * Math.max(w, h));
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const r = Math.hypot(w, h) / 2 + pad;
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    ctx.moveTo(cx + r, cy); // start a separate sub-path so the circle becomes a hole
+    ctx.arc(cx, cy, r, 0, Math.PI * 2, true);
+    ctx.fill("evenodd");
+    ctx.lineWidth = (3 + 3 * pulse) * px;
+    ctx.strokeStyle = "#facc15";
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    const text = label ? `Here: ${label}` : "Here";
+    ctx.font = `bold ${Math.round(15 * px)}px system-ui, sans-serif`;
+    const tw = ctx.measureText(text).width + 12 * px;
+    const ty = Math.max(20 * px, cy - r - 10 * px);
+    ctx.fillStyle = "#facc15";
+    ctx.fillRect(Math.min(W - tw, Math.max(0, cx - tw / 2)), ty - 18 * px, tw, 24 * px);
+    ctx.fillStyle = "#111";
+    ctx.fillText(text, Math.min(W - tw, Math.max(0, cx - tw / 2)) + 6 * px, ty);
+    ctx.restore();
   }
 
   function create(opts) {
     return new Engine(opts);
   }
 
-  return { load, create, SceneMemory, RoomGeometry, Appearance, cropWithMargin, DEFAULTS, Engine };
+  return { load, create, drawSpotlight, SceneMemory, RoomGeometry, Appearance, cropWithMargin, DEFAULTS, Engine };
 });
