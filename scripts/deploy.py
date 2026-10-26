@@ -154,9 +154,17 @@ def main() -> None:
     instance = outputs.get("DemoCameraInstanceId")
     if instance and bundle_changed and env.get("ICAMFIND_DEMO_INSTANCE") == instance:
         # Restart the camera service so it downloads the new bundle (no-op while first boot is still installing).
-        aws("ssm", "send-command", "--region", region, "--instance-ids", instance, "--document-name",
-            "AWS-RunShellScript", "--parameters",
-            'commands=["systemctl list-unit-files icamfind.service >/dev/null && systemctl restart icamfind || true"]')
+        import boto3  # boto3 rather than the CLI: the Windows shell would mangle && and || in the command
+
+        try:
+            boto3.client("ssm", region_name=region).send_command(
+                InstanceIds=[instance], DocumentName="AWS-RunShellScript",
+                Parameters={"commands": ["systemctl list-unit-files icamfind.service >/dev/null && "
+                                         "systemctl restart icamfind || true"]})
+            print("demo camera restarting with the new bundle")
+        except Exception as exc:
+            print(f"note: demo camera not reachable through SSM yet ({type(exc).__name__}); "
+                  "it loads the new bundle on its next restart")
 
     env.update({"ICAMFIND_API_URL": api_url, "AWS_REGION": region, "ICAMFIND_DEMO_DEVICE_TOKEN": demo_token,
                 "ICAMFIND_USER_POOL_ID": outputs["UserPoolId"], "ICAMFIND_CLIENT_ID": outputs["UserPoolClientId"],

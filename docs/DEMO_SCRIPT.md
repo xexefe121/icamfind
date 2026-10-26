@@ -7,13 +7,19 @@ the door.
 
 ## Before recording (10 minutes)
 
-1. `python scripts/reset_memory.py --yes`, then delete the local `data/` folder (clean memory).
-2. `python -m icamfind calibrate`. Draw zones named `desk`, `shelf`, `side table` and `door`,
+1. Open the web app and sign in. Create your own account; the shared Demo home is fine for
+   rehearsal, but record in **My home**.
+2. In **My home**, go to **Cameras → Add a camera** ("Living room") and copy the PowerShell command.
+3. `python -m icamfind calibrate`. Draw zones named `desk`, `shelf`, `side table` and `door`,
    and mark `door` as the exit.
-3. `python -m icamfind run` and open the web app on a laptop next to the camera (large-text mode on).
-4. Props: keys on a keyring, wallet, glasses case, pill bottle. Matte, distinct objects at least
+4. Paste the command from step 2. It runs `python -m icamfind run` with your camera's token.
+   Keep the web app open next to it, with large-text mode on.
+5. Props: keys on a keyring, wallet, glasses case, pill bottle. Matte, distinct objects at least
    about 3 cm across in the image work best.
-5. In the app, star the keys and wallet as essentials, or let Claude flag them automatically.
+6. Star the keys and wallet as essentials, or let Claude flag them automatically.
+
+Optional shot: switch the Home selector to **Demo home** to show that anyone can try iCamFind
+online. A cloud replay camera feeds it around the clock.
 
 ## Shot list
 

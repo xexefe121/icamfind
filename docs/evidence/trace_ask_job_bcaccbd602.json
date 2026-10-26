@@ -1,0 +1,159 @@
+{
+ "job": {
+  "answer": "Your dinner plate is on the shelf, exactly where the camera shows it now.",
+  "confidence": "high",
+  "created": 1793017145.537159,
+  "finished": 1793017150.681457,
+  "id": "job_bcaccbd602",
+  "mode": "ask",
+  "model": "au.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "object_id": "obj_63e37762cd",
+  "question": "Where is the dinner plate?",
+  "status": "done"
+ },
+ "steps": [
+  {
+   "ts": 1793017146.440576,
+   "kind": "thought",
+   "text": "I'll help you find the dinner plate. Let me start by checking what we have in memory.",
+   "n": 1
+  },
+  {
+   "ts": 1793017146.496567,
+   "kind": "tool_call",
+   "input": {},
+   "tool": "list_objects",
+   "n": 2
+  },
+  {
+   "ts": 1793017146.526366,
+   "output": {
+    "now": "Monday 22:19",
+    "objects": [
+     {
+      "description": "A red disposable plastic cup with a white rim, commonly used for beverages.",
+      "essential": false,
+      "label": "red cup",
+      "last_event": "removed",
+      "last_seen": "9 seconds ago",
+      "object_id": "obj_05a20d7fb6",
+      "status": "removed",
+      "zone": "desk"
+     },
+     {
+      "description": "A brown chocolate bar with a textured surface visible through a brown wrapper.",
+      "essential": false,
+      "label": "chocolate bar",
+      "last_event": "removed",
+      "last_seen": "16 seconds ago",
+      "object_id": "obj_0507d01b1d",
+      "status": "removed",
+      "zone": "side table"
+     },
+     {
+      "description": "A white ceramic plate with a subtle textured rim, commonly used for serving meals.",
+      "essential": false,
+      "label": "dinner plate",
+      "last_event": "moved",
+      "last_seen": "23 seconds ago",
+      "object_id": "obj_63e37762cd",
+      "status": "present",
+      "zone": "shelf"
+     },
+     {
+      "description": "A rectangular gold-colored ingot or bullion bar with a shiny metallic finish.",
+      "essential": false,
+      "label": "gold bar",
+      "last_event": "moved",
+      "last_seen": "35 seconds ago",
+      "object_id": "obj_1415ad58ff",
+      "status": "present",
+      "zone": "desk"
+     },
+     {
+      "description": "A small red fabric flag with a white crescent and star symbol, appearing to be a Turkish flag.",
+      "essential": false,
+      "label": "red flag",
+      "last_event": "removed",
+      "last_seen": "47 seconds ago",
+      "object_id": "obj_6c2f618d94",
+      "status": "removed",
+      "zone": "desk"
+     }
+    ]
+   },
+   "kind": "tool_result",
+   "n": 3,
+   "tool": "list_objects"
+  },
+  {
+   "ts": 1793017147.615843,
+   "kind": "thought",
+   "text": "Good news! Memory shows the dinner plate is on the shelf. Let me verify this with the camera right now.",
+   "n": 4
+  },
+  {
+   "ts": 1793017147.621282,
+   "kind": "tool_call",
+   "input": {
+    "object_id": "obj_63e37762cd"
+   },
+   "n": 5,
+   "tool": "verify_object_live"
+  },
+  {
+   "ts": 1793017149.380852,
+   "kind": "tool_result",
+   "output": {
+    "bbox": [
+     467,
+     73,
+     45,
+     51
+    ],
+    "match_empty_surface": 0.234,
+    "match_object": 0.799,
+    "object_id": "obj_63e37762cd",
+    "occluded": false,
+    "ok": true,
+    "present": true,
+    "similarity": 0.799,
+    "zone": "shelf"
+   },
+   "tool": "verify_object_live",
+   "n": 6
+  },
+  {
+   "ts": 1793017150.660765,
+   "kind": "thought",
+   "text": "Perfect! The dinner plate is on the shelf. The camera can see it clearly right now.",
+   "n": 7
+  },
+  {
+   "ts": 1793017150.666201,
+   "kind": "tool_call",
+   "input": {
+    "answer": "Your dinner plate is on the shelf, exactly where the camera shows it now.",
+    "confidence": "high",
+    "object_id": "obj_63e37762cd"
+   },
+   "n": 8,
+   "tool": "final_answer"
+  },
+  {
+   "ts": 1793017150.671404,
+   "kind": "tool_result",
+   "output": {
+    "ok": true
+   },
+   "tool": "final_answer",
+   "n": 9
+  },
+  {
+   "ts": 1793017150.676397,
+   "kind": "answer",
+   "text": "Your dinner plate is on the shelf, exactly where the camera shows it now.",
+   "n": 10
+  }
+ ]
+}
