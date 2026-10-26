@@ -325,6 +325,7 @@ def routine_prompt(routine: dict) -> str:
 
 def handler(event, context):
     job = event["job"]
+    store.set_household(job["household"])
     run = Run(job, local_tz=event.get("tz") or "UTC")
     try:
         question = routine_prompt(run.routine) if job.get("mode") == "routine" and run.routine else job["question"]

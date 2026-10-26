@@ -56,6 +56,9 @@ nothing turned what it sees into a memory you can ask.
 - **Agent:** a manual tool-use loop. Its tools are backed by the device's OpenCV routines through a
   DynamoDB command queue, and the device returns fresh crops that the model sees as images.
   Caregiver notifications are gated by policy in code, not left to the model.
+- **Accounts:** Amazon Cognito (hosted UI, PKCE) with an API Gateway JWT authorizer. Data is
+  partitioned by household, every user also sees a shared Demo home fed by a cloud replay camera
+  (Graviton EC2), and per-camera device tokens are stored as hashes.
 - **Web app:** plain HTML/JS, no build step. Voice input and read-aloud, large-text and
   high-contrast modes, fully keyboard operable.
 
@@ -107,19 +110,18 @@ aws-cloudformation, javascript, html, css
 
 ## Testing instructions for judges (put in the private judging notes)
 
-1. Open the live app URL below and enter the access code (given privately; it is the
-   `ICAMFIND_TOKEN` value in the team's `.icamfind.env`).
-2. The home device is a laptop with a webcam. During the judging window we can run it on request
-   for a live screen share. When it is offline, the app still answers from memory and shows the
-   camera as offline.
-3. Without our hardware, run the full pipeline against a recorded clip:
-   `python -m icamfind run --config config.synthetic.json` after `python -m icamfind benchmark --no-dnn`
-   (see README). The agent's live checks then run against that clip.
-4. Reproduce the numbers: `python -m icamfind benchmark --no-dnn` and `python scripts/ablation.py`.
+1. Open the live app (link below) and choose **Sign in or create an account**. Use the judge account
+   `judges@icamfind.example` (password in the private notes), or sign up with your own email.
+2. Switch the **Home** selector to **Demo home**. Its camera is a Graviton EC2 instance running our
+   OpenCV 5 pipeline on a recorded room around the clock. Ask "Where is the wallet?" and watch the
+   agent check memory, make the camera look again, and scan the room.
+3. In **My home**, use **Cameras → Add a camera** to connect your own webcam. Run the command it
+   shows after `pip install -r requirements.txt` (see README). That home is private to your account.
+4. Reproduce our numbers: `python -m icamfind benchmark --no-dnn` and `python scripts/ablation.py`.
 
 ## Links
 
 - Code: (repository URL)
-- Live app: https://y8zildryr6.execute-api.ap-southeast-2.amazonaws.com/ (judge access code
-  provided in the private judging notes)
+- Live app: https://o91wekq4k6.execute-api.ap-southeast-2.amazonaws.com/ (sign up, or use the judge
+  account from the private judging notes)
 - Video: (YouTube unlisted URL)

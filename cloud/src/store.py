@@ -1,8 +1,14 @@
-"""DynamoDB single-table store and S3 image store for iCamFind."""
+"""DynamoDB single-table store and S3 image store for iCamFind, partitioned by household.
+
+Every request handler calls `set_household(hid)` first; all household data keys are prefixed with
+`H#<hid>#`, so one household can never read another's memory. Items addressed by a globally unique
+id (commands, jobs, approvals, routines) carry a `household` attribute that is checked on read.
+"""
 
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 import time
 import uuid
@@ -15,10 +21,24 @@ from boto3.dynamodb.conditions import Attr, Key
 TABLE = os.environ.get("TABLE_NAME", "icamfind")
 BUCKET = os.environ.get("BUCKET_NAME", "")
 REGION = os.environ.get("AWS_REGION", "us-east-1")
+DEMO_HOUSEHOLD = "demo"
 
 _ddb = boto3.resource("dynamodb", region_name=REGION)
 _s3 = boto3.client("s3", region_name=REGION)
 table = _ddb.Table(TABLE)
+
+HOUSEHOLD: str | None = None
+
+
+def set_household(household_id: str) -> None:
+    global HOUSEHOLD
+    HOUSEHOLD = household_id
+
+
+def _h(key: str) -> str:
+    if not HOUSEHOLD:
+        raise RuntimeError("household not set")
+    return f"H#{HOUSEHOLD}#{key}"
 
 
 def new_id(prefix: str) -> str:
@@ -59,6 +79,70 @@ def clean(item: dict | None) -> dict | None:
     return item
 
 
+def _mine(item: dict | None) -> dict | None:
+    """Return a globally-addressed item only if it belongs to the current household."""
+    item = clean(item)
+    if item is None or item.get("household") != HOUSEHOLD:
+        return None
+    return item
+
+
+# ------------------------------------------------------------------- users, households, device tokens
+
+def get_user(sub: str) -> dict | None:
+    return clean(table.get_item(Key={"pk": f"USER#{sub}", "sk": "META"}).get("Item"))
+
+
+def ensure_user(sub: str, email: str) -> dict:
+    """First sign-in creates a private household and joins the shared demo household."""
+    user = get_user(sub)
+    if user:
+        return user
+    hid = new_id("hh")
+    table.put_item(Item=to_ddb({"pk": f"HH#{hid}", "sk": "META", "id": hid, "name": "My home", "owner": sub,
+                                "created": now()}))
+    user = {"sub": sub, "email": email, "households": [hid, DEMO_HOUSEHOLD], "owner_of": [hid], "created": now()}
+    table.put_item(Item=to_ddb({"pk": f"USER#{sub}", "sk": "META", **user}),
+                   ConditionExpression="attribute_not_exists(pk)")
+    return user
+
+
+def get_household(hid: str) -> dict | None:
+    if hid == DEMO_HOUSEHOLD:
+        return {"id": DEMO_HOUSEHOLD, "name": "Demo home", "demo": True}
+    item = clean(table.get_item(Key={"pk": f"HH#{hid}", "sk": "META"}).get("Item"))
+    if item:
+        item["demo"] = False
+    return item
+
+
+def token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def create_device(name: str) -> tuple[dict, str]:
+    import secrets
+
+    token = "icf_" + secrets.token_urlsafe(32)
+    device = {"id": new_id("dev"), "name": name[:60] or "Camera", "household": HOUSEHOLD, "created": now()}
+    table.put_item(Item=to_ddb({"pk": f"DEVTOKEN#{token_hash(token)}", "sk": "META", **device}))
+    table.put_item(Item=to_ddb({"pk": _h(f"DEV#{device['id']}"), "sk": "META", "gsi1pk": _h("DEVICES"),
+                                "gsi1sk": device["id"], **device}))
+    return device, token
+
+
+def device_for_token(token: str) -> dict | None:
+    if not token:
+        return None
+    return clean(table.get_item(Key={"pk": f"DEVTOKEN#{token_hash(token)}", "sk": "META"}).get("Item"))
+
+
+def register_device_token(token_sha256: str, household: str, device_id: str, name: str) -> None:
+    """Idempotently bind a pre-generated device token hash (used for the demo replay camera)."""
+    table.put_item(Item=to_ddb({"pk": f"DEVTOKEN#{token_sha256}", "sk": "META", "id": device_id, "name": name,
+                                "household": household, "created": now()}))
+
+
 # ------------------------------------------------------------------- images
 
 def put_image(key: str, data_b64: str | None = None, data: bytes | None = None) -> str | None:
@@ -66,17 +150,25 @@ def put_image(key: str, data_b64: str | None = None, data: bytes | None = None) 
         data = base64.b64decode(data_b64)
     if not data:
         return None
-    _s3.put_object(Bucket=BUCKET, Key=key, Body=data, ContentType="image/jpeg",
-                   ServerSideEncryption="AES256")
+    kind, _, rest = key.partition("/")  # keep the type prefix first so S3 lifecycle rules apply
+    key = f"{kind}/{HOUSEHOLD}/{rest}"
+    _s3.put_object(Bucket=BUCKET, Key=key, Body=data, ContentType="image/jpeg", ServerSideEncryption="AES256")
     return key
 
 
+def _owned(key: str) -> bool:
+    parts = key.split("/")
+    return len(parts) > 2 and parts[1] == HOUSEHOLD
+
+
 def get_image(key: str) -> bytes:
+    if not _owned(key):
+        raise PermissionError("image belongs to another household")
     return _s3.get_object(Bucket=BUCKET, Key=key)["Body"].read()
 
 
 def url(key: str | None, expires: int = 3600) -> str | None:
-    if not key:
+    if not key or not _owned(key):
         return None
     return _s3.generate_presigned_url("get_object", Params={"Bucket": BUCKET, "Key": key}, ExpiresIn=expires)
 
@@ -84,103 +176,103 @@ def url(key: str | None, expires: int = 3600) -> str | None:
 # ------------------------------------------------------------------- objects & events
 
 def get_object(object_id: str) -> dict | None:
-    return clean(table.get_item(Key={"pk": f"OBJ#{object_id}", "sk": "STATE"}).get("Item"))
+    return clean(table.get_item(Key={"pk": _h(f"OBJ#{object_id}"), "sk": "STATE"}).get("Item"))
 
 
 def put_object(obj: dict) -> dict:
-    item = {"pk": f"OBJ#{obj['id']}", "sk": "STATE", "gsi1pk": "OBJECTS",
+    item = {"pk": _h(f"OBJ#{obj['id']}"), "sk": "STATE", "gsi1pk": _h("OBJECTS"),
             "gsi1sk": f"{obj.get('last_seen', now()):017.6f}", **obj}
     table.put_item(Item=to_ddb(item))
     return obj
 
 
 def list_objects(limit: int = 200) -> list[dict]:
-    res = table.query(IndexName="gsi1", KeyConditionExpression=Key("gsi1pk").eq("OBJECTS"),
+    res = table.query(IndexName="gsi1", KeyConditionExpression=Key("gsi1pk").eq(_h("OBJECTS")),
                       ScanIndexForward=False, Limit=limit)
     return [clean(i) for i in res.get("Items", [])]
 
 
 def put_event(event: dict) -> dict:
     sk = f"EV#{event['ts']:017.6f}#{event['id']}"
-    item = {"pk": f"OBJ#{event['object_id']}", "sk": sk, "gsi1pk": "EVENTS", "gsi1sk": sk[3:], **event}
+    item = {"pk": _h(f"OBJ#{event['object_id']}"), "sk": sk, "gsi1pk": _h("EVENTS"), "gsi1sk": sk[3:], **event}
     table.put_item(Item=to_ddb(item))
     return event
 
 
 def object_events(object_id: str, limit: int = 50) -> list[dict]:
-    res = table.query(KeyConditionExpression=Key("pk").eq(f"OBJ#{object_id}") & Key("sk").begins_with("EV#"),
+    res = table.query(KeyConditionExpression=Key("pk").eq(_h(f"OBJ#{object_id}")) & Key("sk").begins_with("EV#"),
                       ScanIndexForward=False, Limit=limit)
     return [clean(i) for i in res.get("Items", [])]
 
 
-def recent_events(limit: int = 50, since: float | None = None) -> list[dict]:
-    cond = Key("gsi1pk").eq("EVENTS")
-    if since is not None:
-        cond = cond & Key("gsi1sk").gte(f"{since:017.6f}")
-    res = table.query(IndexName="gsi1", KeyConditionExpression=cond, ScanIndexForward=False, Limit=limit)
+def recent_events(limit: int = 50) -> list[dict]:
+    res = table.query(IndexName="gsi1", KeyConditionExpression=Key("gsi1pk").eq(_h("EVENTS")),
+                      ScanIndexForward=False, Limit=limit)
     return [clean(i) for i in res.get("Items", [])]
 
 
 # ------------------------------------------------------------------- devices & commands
 
 def get_device(device_id: str) -> dict | None:
-    return clean(table.get_item(Key={"pk": f"DEV#{device_id}", "sk": "META"}).get("Item"))
+    return clean(table.get_item(Key={"pk": _h(f"DEV#{device_id}"), "sk": "META"}).get("Item"))
 
 
 def put_device(device: dict) -> None:
-    table.put_item(Item=to_ddb({"pk": f"DEV#{device['id']}", "sk": "META", "gsi1pk": "DEVICES",
-                                "gsi1sk": device["id"], **device}))
+    table.put_item(Item=to_ddb({"pk": _h(f"DEV#{device['id']}"), "sk": "META", "gsi1pk": _h("DEVICES"),
+                                "gsi1sk": device["id"], **device, "household": HOUSEHOLD}))
 
 
 def list_devices() -> list[dict]:
-    res = table.query(IndexName="gsi1", KeyConditionExpression=Key("gsi1pk").eq("DEVICES"))
+    res = table.query(IndexName="gsi1", KeyConditionExpression=Key("gsi1pk").eq(_h("DEVICES")))
     return [clean(i) for i in res.get("Items", [])]
 
 
 def create_command(device_id: str, kind: str, args: dict) -> dict:
-    cmd = {"id": new_id("cmd"), "device": device_id, "kind": kind, "args": args, "status": "pending",
-           "created": now()}
-    table.put_item(Item=to_ddb({"pk": f"CMD#{cmd['id']}", "sk": "META", "gsi1pk": f"PENDING#{device_id}",
+    cmd = {"id": new_id("cmd"), "device": device_id, "household": HOUSEHOLD, "kind": kind, "args": args,
+           "status": "pending", "created": now()}
+    table.put_item(Item=to_ddb({"pk": f"CMD#{cmd['id']}", "sk": "META", "gsi1pk": _h(f"PENDING#{device_id}"),
                                 "gsi1sk": f"{cmd['created']:017.6f}", "ttl": int(now()) + 86400, **cmd}))
     return cmd
 
 
 def pending_commands(device_id: str) -> list[dict]:
-    res = table.query(IndexName="gsi1", KeyConditionExpression=Key("gsi1pk").eq(f"PENDING#{device_id}"))
+    res = table.query(IndexName="gsi1", KeyConditionExpression=Key("gsi1pk").eq(_h(f"PENDING#{device_id}")))
     cmds = []
     for item in res.get("Items", []):
         cmd = clean(item)
-        if now() - cmd["created"] > 120:
-            # Stale (device was offline); expire instead of executing late.
-            table.update_item(Key={"pk": f"CMD#{cmd['id']}", "sk": "META"},
-                              UpdateExpression="SET #s = :s REMOVE gsi1pk, gsi1sk",
-                              ExpressionAttributeNames={"#s": "status"}, ExpressionAttributeValues={":s": "expired"})
-            continue
+        status = "expired" if now() - cmd["created"] > 120 else "sent"  # stale: device was offline
         table.update_item(Key={"pk": f"CMD#{cmd['id']}", "sk": "META"},
                           UpdateExpression="SET #s = :s REMOVE gsi1pk, gsi1sk",
-                          ExpressionAttributeNames={"#s": "status"}, ExpressionAttributeValues={":s": "sent"})
-        cmds.append({k: cmd[k] for k in ("id", "kind", "args", "created")})
+                          ExpressionAttributeNames={"#s": "status"}, ExpressionAttributeValues={":s": status})
+        if status == "sent":
+            cmds.append({k: cmd[k] for k in ("id", "kind", "args", "created")})
     return cmds
 
 
-def complete_command(command_id: str, result: dict, image_key: str | None) -> None:
-    table.update_item(
-        Key={"pk": f"CMD#{command_id}", "sk": "META"},
-        UpdateExpression="SET #s = :s, #r = :r, image_key = :i, completed = :c",
-        ExpressionAttributeNames={"#s": "status", "#r": "result"},
-        ExpressionAttributeValues=to_ddb({":s": "done", ":r": result, ":i": image_key or "", ":c": now()}),
-    )
+def complete_command(command_id: str, device_id: str, result: dict, image_key: str | None) -> bool:
+    try:
+        table.update_item(
+            Key={"pk": f"CMD#{command_id}", "sk": "META"},
+            UpdateExpression="SET #s = :s, #r = :r, image_key = :i, completed = :c",
+            ConditionExpression="household = :h AND device = :d",
+            ExpressionAttributeNames={"#s": "status", "#r": "result"},
+            ExpressionAttributeValues=to_ddb({":s": "done", ":r": result, ":i": image_key or "", ":c": now(),
+                                              ":h": HOUSEHOLD, ":d": device_id}),
+        )
+        return True
+    except table.meta.client.exceptions.ConditionalCheckFailedException:
+        return False
 
 
 def get_command(command_id: str) -> dict | None:
-    return clean(table.get_item(Key={"pk": f"CMD#{command_id}", "sk": "META"}, ConsistentRead=True).get("Item"))
+    return _mine(table.get_item(Key={"pk": f"CMD#{command_id}", "sk": "META"}, ConsistentRead=True).get("Item"))
 
 
 # ------------------------------------------------------------------- jobs (agent runs)
 
 def create_job(question: str, mode: str, extra: dict | None = None) -> dict:
-    job = {"id": new_id("job"), "question": question, "mode": mode, "status": "running", "created": now(),
-           **(extra or {})}
+    job = {"id": new_id("job"), "household": HOUSEHOLD, "question": question, "mode": mode, "status": "running",
+           "created": now(), **(extra or {})}
     table.put_item(Item=to_ddb({"pk": f"JOB#{job['id']}", "sk": "META", "ttl": int(now()) + 7 * 86400, **job}))
     return job
 
@@ -206,6 +298,8 @@ def get_job(job_id: str) -> tuple[dict | None, list[dict]]:
             meta = clean(item)
         else:
             steps.append(clean(item))
+    if meta is None or meta.get("household") != HOUSEHOLD:
+        return None, []
     steps.sort(key=lambda s: s["n"])
     return meta, steps
 
@@ -213,13 +307,14 @@ def get_job(job_id: str) -> tuple[dict | None, list[dict]]:
 # ------------------------------------------------------------------- routines, alerts, approvals
 
 def _put_listed(kind: str, item: dict, sort: str) -> dict:
-    table.put_item(Item=to_ddb({"pk": f"{kind}#{item['id']}", "sk": "META", "gsi1pk": f"{kind}S",
+    item = {**item, "household": HOUSEHOLD}
+    table.put_item(Item=to_ddb({"pk": f"{kind}#{item['id']}", "sk": "META", "gsi1pk": _h(f"{kind}S"),
                                 "gsi1sk": sort, **item}))
     return item
 
 
 def _list(kind: str, limit: int = 50, newest_first: bool = True) -> list[dict]:
-    res = table.query(IndexName="gsi1", KeyConditionExpression=Key("gsi1pk").eq(f"{kind}S"),
+    res = table.query(IndexName="gsi1", KeyConditionExpression=Key("gsi1pk").eq(_h(f"{kind}S")),
                       ScanIndexForward=not newest_first, Limit=limit)
     return [clean(i) for i in res.get("Items", [])]
 
@@ -232,12 +327,29 @@ def list_routines() -> list[dict]:
     return _list("ROUTINE", 100, newest_first=False)
 
 
+def all_routines() -> list[dict]:
+    """Every household's routines (scheduler only)."""
+    items, start = [], None
+    while True:
+        kwargs = {"FilterExpression": Attr("pk").begins_with("ROUTINE#")}
+        if start:
+            kwargs["ExclusiveStartKey"] = start
+        page = table.scan(**kwargs)
+        items += [clean(i) for i in page.get("Items", [])]
+        start = page.get("LastEvaluatedKey")
+        if not start:
+            return items
+
+
 def get_routine(rid: str) -> dict | None:
-    return clean(table.get_item(Key={"pk": f"ROUTINE#{rid}", "sk": "META"}).get("Item"))
+    return _mine(table.get_item(Key={"pk": f"ROUTINE#{rid}", "sk": "META"}).get("Item"))
 
 
-def delete_routine(rid: str) -> None:
+def delete_routine(rid: str) -> bool:
+    if get_routine(rid) is None:
+        return False
     table.delete_item(Key={"pk": f"ROUTINE#{rid}", "sk": "META"})
+    return True
 
 
 def put_alert(a: dict) -> dict:
@@ -253,12 +365,9 @@ def put_approval(a: dict) -> dict:
 
 
 def get_approval(aid: str) -> dict | None:
-    return clean(table.get_item(Key={"pk": f"APPROVAL#{aid}", "sk": "META"}).get("Item"))
+    return _mine(table.get_item(Key={"pk": f"APPROVAL#{aid}", "sk": "META"}).get("Item"))
 
 
 def list_approvals(status: str | None = "pending", limit: int = 20) -> list[dict]:
     items = _list("APPROVAL", limit)
     return [a for a in items if status is None or a.get("status") == status]
-
-
-__all__ = ["Attr"]

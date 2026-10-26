@@ -31,7 +31,7 @@ class Uplink:
         self.synced: set[str] = set(self.synced_path.read_text().split()) if self.synced_path.exists() else set()
         self.session = requests.Session()
         if token:
-            self.session.headers["x-icamfind-token"] = token
+            self.session.headers["x-icamfind-device-token"] = token
         self.outbox: queue.Queue = queue.Queue()
         self.label_updates: queue.Queue = queue.Queue()
         self.online = False
@@ -85,7 +85,7 @@ class Uplink:
             r = self.session.post(f"{self.api_url}{path}", json=body, timeout=timeout)
             self.online = r.status_code < 500
             if r.status_code == 401:
-                log.error("cloud rejected token (401); check ICAMFIND_TOKEN")
+                log.error("cloud rejected the device token (401); check ICAMFIND_DEVICE_TOKEN")
                 return None
             r.raise_for_status()
             return r.json()
@@ -109,10 +109,10 @@ class Uplink:
         event, crop = self._load_event(event_id)
         if event is None:
             return True
-        body = {"device": self.device_id, "event": event}
+        body = {"event": event}
         if crop:
             body["crop_b64"] = base64.b64encode(crop).decode()
-        res = self._post("/api/events", body, timeout=40.0)
+        res = self._post("/api/device/events", body, timeout=40.0)
         if res is None:
             return False
         self.synced.add(event_id)
@@ -124,20 +124,20 @@ class Uplink:
         return True
 
     def heartbeat(self, payload: dict, snapshot_jpeg: bytes | None = None) -> None:
-        body = {"device": self.device_id, **payload}
+        body = dict(payload)
         if snapshot_jpeg:
             body["snapshot_b64"] = base64.b64encode(snapshot_jpeg).decode()
-        self._post("/api/devices/heartbeat", body, timeout=20.0)
+        self._post("/api/device/heartbeat", body, timeout=20.0)
 
     def fetch_commands(self) -> list[dict]:
-        res = self._get(f"/api/devices/{self.device_id}/commands")
+        res = self._get("/api/device/commands")
         return (res or {}).get("commands", [])
 
     def send_result(self, command_id: str, result: dict, image_jpeg: bytes | None = None) -> None:
-        body = {"device": self.device_id, "result": result}
+        body = {"result": result}
         if image_jpeg:
             body["crop_b64"] = base64.b64encode(image_jpeg).decode()
-        self._post(f"/api/commands/{command_id}/result", body)
+        self._post(f"/api/device/commands/{command_id}/result", body)
 
     def send_alert(self, alert: dict) -> None:
         if self.enabled:
@@ -147,7 +147,7 @@ class Uplink:
 
     def start(self) -> None:
         if not self.enabled:
-            log.info("cloud uplink disabled (no ICAMFIND_API_URL / ICAMFIND_TOKEN); running local-only")
+            log.info("cloud uplink disabled (no ICAMFIND_API_URL / ICAMFIND_DEVICE_TOKEN); running local-only")
             return
         for eid in self.pending_ids():
             self.outbox.put(("event", eid))
@@ -168,7 +168,7 @@ class Uplink:
             if kind == "event":
                 ok = self.send_event(item)
             elif kind == "alert":
-                ok = self._post("/api/alerts", {"device": self.device_id, **item}) is not None
+                ok = self._post("/api/device/alerts", item) is not None
             if ok:
                 backoff = 1.0
             else:

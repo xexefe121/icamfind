@@ -181,6 +181,7 @@ label { font-weight: 600; display: block; margin: .5rem 0 .25rem; }
 }
 .login-card h1 { font-size: 1.6rem; margin-top: 1rem; }
 .login-card .btn { margin-top: 1rem; }
+.login-note { margin: 1rem 0 0; }
 
 /* ---------- Header ---------- */
 
@@ -193,7 +194,19 @@ label { font-weight: 600; display: block; margin: .5rem 0 .25rem; }
 .brand-mark { color: var(--accent); }
 .brand-lg { font-size: 1.5rem; }
 .header-status { display: flex; gap: .5rem; flex-wrap: wrap; flex: 1; }
-.header-actions { display: flex; gap: .25rem; }
+.header-actions { display: flex; gap: .25rem; align-items: center; }
+.user-email { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 .4rem; }
+
+.household { display: flex; align-items: center; gap: .4rem; }
+.household-label { display: inline; margin: 0; font-size: .9rem; }
+.household select { width: auto; min-height: 40px; padding: .3rem .6rem; max-width: 14rem; }
+.badge-demo {
+  display: inline-flex; align-items: center; padding: .15rem .55rem; border-radius: 999px;
+  background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn);
+  font-size: .8rem; font-weight: 700; letter-spacing: .02em;
+}
+.demo-banner { background: var(--warn-soft); border-top: 1px solid var(--warn); }
+.demo-banner p { max-width: 1200px; margin: 0 auto; padding: .5rem 16px; font-size: .95rem; color: var(--text); }
 
 /* ---------- Main layout ---------- */
 
@@ -278,6 +291,27 @@ pre.json {
   margin: 0; padding: .6rem .7rem; background: var(--surface-2); border-radius: var(--radius-sm);
   font-size: .8rem; overflow: auto; max-height: 260px; white-space: pre-wrap; word-break: break-word;
 }
+
+/* ---------- Cameras ---------- */
+
+.cameras-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 1.25rem; align-items: start; }
+.cameras-grid h3 { margin-top: 0; }
+.camera-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; }
+.camera-item .ev-time { margin: .3rem 0 0; }
+.token-panel {
+  margin-top: 1rem; border: 2px solid var(--accent); border-radius: var(--radius-sm);
+  padding: 1rem; background: var(--accent-soft);
+}
+.token-panel h3 { margin-top: 0; outline: none; }
+.token-panel .warning { color: var(--danger); margin: .25rem 0 .5rem; }
+.token-row { display: flex; gap: .5rem; }
+.token-row input { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.field-label { font-weight: 600; margin: .75rem 0 .25rem; }
+pre.command {
+  margin: 0; padding: .6rem .7rem; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-size: .85rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+}
+.token-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
 
 /* ---------- Room view ---------- */
 
@@ -407,6 +441,10 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
   .detail-top img { width: 100%; height: auto; aspect-ratio: 4 / 3; }
   .objects-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   .header-actions { width: 100%; justify-content: flex-end; }
+  .household { width: 100%; }
+  .household select { flex: 1; max-width: none; }
+  .user-email { margin-right: auto; padding-left: 0; }
+  .cameras-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {

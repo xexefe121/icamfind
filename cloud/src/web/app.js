@@ -35,7 +35,13 @@
   };
 
   const state = {
-    token: null,
+    config: null, // {cognito_domain, client_id, redirect_uri, region} from config.json
+    auth: null, // {id_token, refresh_token, expires_at}
+    me: null,
+    households: [],
+    household: null, // selected household id (sent as x-icamfind-household)
+    householdInfo: null, // {id, name, demo} from /api/state
+    devices: [],
     device: null,
     objects: [],
     alerts: [],
@@ -184,12 +190,180 @@
     toastTimer = setTimeout(() => { t.hidden = true; }, 4500);
   }
 
+  // ---------- Sign-in: Cognito hosted UI, authorization code + PKCE ----------
+
+  const AUTH_KEY = "icamfind.auth";
+  const PKCE_KEY = "icamfind.pkce";
+  const HOME_KEY = "icamfind.household";
+
+  const session = {
+    get(key) {
+      try { return sessionStorage.getItem(key); } catch { return null; }
+    },
+    set(key, value) {
+      try {
+        if (value === null || value === undefined) sessionStorage.removeItem(key);
+        else sessionStorage.setItem(key, value);
+        return true;
+      } catch { return false; }
+    },
+  };
+
+  function b64url(bytes) {
+    let s = "";
+    bytes.forEach((b) => { s += String.fromCharCode(b); });
+    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function randomString(nBytes) {
+    const a = new Uint8Array(nBytes);
+    crypto.getRandomValues(a);
+    return b64url(a);
+  }
+
+  async function pkceChallenge(verifier) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+    return b64url(new Uint8Array(digest));
+  }
+
+  function jwtExpiryMs(token) {
+    try {
+      const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+      const bin = atob(part + "===".slice((part.length + 3) % 4));
+      const claims = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))));
+      return typeof claims.exp === "number" ? claims.exp * 1000 : 0;
+    } catch { return 0; }
+  }
+
+  function loadAuth() {
+    try {
+      const a = JSON.parse(store.get(AUTH_KEY) || "null");
+      return a && a.id_token ? a : null;
+    } catch { return null; }
+  }
+
+  function saveAuth(a) {
+    state.auth = a;
+    store.set(AUTH_KEY, a ? JSON.stringify(a) : null);
+  }
+
+  function tokenSet(resp, previous) {
+    const fallback = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
+    return {
+      id_token: resp.id_token,
+      refresh_token: resp.refresh_token || (previous && previous.refresh_token) || null,
+      expires_at: jwtExpiryMs(resp.id_token) || fallback,
+    };
+  }
+
+  async function tokenRequest(params) {
+    const res = await fetch(`${state.config.cognito_domain}/oauth2/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(params).toString(),
+    });
+    let data = null;
+    try { data = await res.json(); } catch { /* non-JSON error page */ }
+    if (!res.ok || !data || !data.id_token) {
+      throw new Error((data && (data.error_description || data.error)) || `Sign-in failed (${res.status})`);
+    }
+    return data;
+  }
+
+  async function beginLogin() {
+    if (!state.config) return;
+    const verifier = randomString(48); // 64 base64url characters
+    const st = randomString(24);
+    const saved = JSON.stringify({ verifier, state: st });
+    // sessionStorage first; fall back to localStorage so the redirect round trip still works.
+    if (!session.set(PKCE_KEY, saved)) store.set(PKCE_KEY, saved);
+    const cfg = state.config;
+    const q = new URLSearchParams({
+      response_type: "code",
+      client_id: cfg.client_id,
+      redirect_uri: cfg.redirect_uri,
+      scope: "openid email profile",
+      code_challenge: await pkceChallenge(verifier),
+      code_challenge_method: "S256",
+      state: st,
+    });
+    location.assign(`${cfg.cognito_domain}/oauth2/authorize?${q.toString()}`);
+  }
+
+  async function handleCallback(params) {
+    let saved = null;
+    try { saved = JSON.parse(session.get(PKCE_KEY) || store.get(PKCE_KEY) || "null"); } catch { saved = null; }
+    session.set(PKCE_KEY, null);
+    store.set(PKCE_KEY, null);
+    if (!saved || !saved.verifier || saved.state !== params.get("state")) {
+      throw new Error("That sign-in link didn't match or has expired. Please sign in again.");
+    }
+    const data = await tokenRequest({
+      grant_type: "authorization_code",
+      client_id: state.config.client_id,
+      code: params.get("code"),
+      redirect_uri: state.config.redirect_uri,
+      code_verifier: saved.verifier,
+    });
+    saveAuth(tokenSet(data, null));
+  }
+
+  let refreshing = null;
+  function refreshTokens() {
+    if (refreshing) return refreshing;
+    const current = state.auth;
+    if (!current || !current.refresh_token || !state.config) return Promise.resolve(false);
+    refreshing = tokenRequest({
+      grant_type: "refresh_token",
+      client_id: state.config.client_id,
+      refresh_token: current.refresh_token,
+    })
+      .then((data) => { saveAuth(tokenSet(data, current)); return true; })
+      .catch(() => false)
+      .finally(() => { refreshing = null; });
+    return refreshing;
+  }
+
+  async function freshIdToken() {
+    if (!state.auth) return null;
+    if (state.auth.expires_at - Date.now() < 60000 && !(await refreshTokens())) return null;
+    return state.auth ? state.auth.id_token : null;
+  }
+
+  // Local session ended (expired or refresh failed): back to the sign-in screen.
+  function expireSession(message) {
+    saveAuth(null);
+    stopJob();
+    showLogin(message);
+  }
+
+  // User-initiated sign-out also ends the hosted-UI session.
+  function signOut() {
+    const cfg = state.config;
+    saveAuth(null);
+    stopJob();
+    stopPolling();
+    if (cfg && cfg.cognito_domain) {
+      const q = new URLSearchParams({ client_id: cfg.client_id, logout_uri: cfg.redirect_uri });
+      location.assign(`${cfg.cognito_domain}/logout?${q.toString()}`);
+    } else {
+      showLogin("");
+    }
+  }
+
   // ---------- API ----------
 
-  async function api(path, opts = {}) {
-    const init = { method: opts.method || "GET", headers: { "x-icamfind-token": state.token || "" } };
+  async function api(path, opts = {}, retried = false) {
+    const token = await freshIdToken();
+    if (!token) {
+      if ($("#login").hidden) expireSession("Your session has ended. Please sign in again.");
+      throw new Error("unauthorized");
+    }
+    const headers = { authorization: `Bearer ${token}` };
+    if (state.household && !opts.noHousehold) headers["x-icamfind-household"] = state.household;
+    const init = { method: opts.method || "GET", headers };
     if (opts.body !== undefined) {
-      init.headers["content-type"] = "application/json";
+      headers["content-type"] = "application/json";
       init.body = JSON.stringify(opts.body);
     }
     let res;
@@ -200,44 +374,151 @@
       throw err;
     }
     if (res.status === 401) {
-      logout("That access code didn't work. Please enter it again.");
+      if (!retried && (await refreshTokens())) return api(path, opts, true);
+      if ($("#login").hidden) expireSession("Your session has ended. Please sign in again.");
       throw new Error("unauthorized");
     }
     let data = null;
     try { data = await res.json(); } catch { /* empty or non-JSON body */ }
     if (!res.ok) {
       const msg = (data && data.error) || `Request failed (${res.status})`;
-      if (!opts.quiet) toast(msg);
+      if (res.status === 403 || !opts.quiet) toast(msg);
       throw new Error(msg);
     }
     return data || {};
   }
 
-  // ---------- Login / session ----------
+  // ---------- Session screens ----------
 
   function showLogin(message) {
     stopPolling();
     $("#app").hidden = true;
     $("#login").hidden = false;
+    $("#login-status").hidden = true;
     const err = $("#login-error");
     err.textContent = message || "";
     err.hidden = !message;
-    $("#token-input").focus();
+    const btn = $("#login-btn");
+    btn.disabled = !state.config;
+    btn.hidden = false;
+    if (!btn.disabled) btn.focus();
   }
 
-  function logout(message) {
-    state.token = null;
-    store.set("icamfind.token", null);
-    stopJob();
-    showLogin(message);
+  function showLoginStatus(text) {
+    $("#app").hidden = true;
+    $("#login").hidden = false;
+    $("#login-error").hidden = true;
+    $("#login-btn").hidden = true;
+    const s = $("#login-status");
+    s.textContent = text;
+    s.hidden = false;
   }
 
-  function startApp() {
+  async function startApp() {
     $("#login").hidden = true;
     $("#app").hidden = false;
+    try {
+      await loadMe();
+    } catch {
+      return; // unauthorized: the sign-in screen is already showing
+    }
     refreshState();
     refreshEvents();
     startPolling();
+  }
+
+  async function loadMe() {
+    try {
+      const d = await api("api/me", { quiet: true, noHousehold: true });
+      state.me = d.user || null;
+      state.households = Array.isArray(d.households) ? d.households : [];
+      const ids = state.households.map((h) => h.id);
+      const pref = store.get(HOME_KEY);
+      state.household = ids.includes(pref) ? pref : (ids.includes(d.current) ? d.current : (ids[0] || null));
+      store.set(HOME_KEY, state.household);
+      renderHouseholdControls();
+    } catch (err) {
+      if (err && err.message === "unauthorized") throw err;
+      toast("Couldn't load your account details. Showing your default home.");
+    }
+  }
+
+  // ---------- Households ----------
+
+  function currentHousehold() {
+    return state.households.find((h) => h.id === state.household) || null;
+  }
+
+  function isDemo() {
+    const h = currentHousehold();
+    if (h) return !!h.demo;
+    return !!(state.householdInfo && state.householdInfo.demo);
+  }
+
+  function householdName(id) {
+    const h = state.households.find((x) => x.id === id);
+    return (h && h.name) || "this home";
+  }
+
+  function renderHouseholdControls() {
+    const sel = $("#household-select");
+    const html = state.households
+      .map((h) => `<option value="${esc(h.id)}">${esc(h.name || "Home")}${h.demo ? " (Demo)" : ""}</option>`)
+      .join("");
+    if (sel._html !== html) {
+      sel.innerHTML = html;
+      sel._html = html;
+    }
+    if (state.household && sel.value !== state.household) sel.value = state.household;
+    $("#household-wrap").hidden = state.households.length === 0;
+
+    const demo = isDemo();
+    $("#demo-badge").hidden = !demo;
+    $("#demo-banner").hidden = !demo;
+
+    const email = state.me && state.me.email;
+    const u = $("#user-email");
+    u.textContent = email || "";
+    u.title = email ? `Signed in as ${email}` : "";
+    u.hidden = !email;
+  }
+
+  // Everything shown below the header belongs to one household; drop it before switching.
+  function resetHouseholdState() {
+    stopJob();
+    state.job = null;
+    state.steps = [];
+    state.openSteps = new Set();
+    state.householdInfo = null;
+    state.device = null;
+    state.devices = [];
+    state.objects = [];
+    state.alerts = [];
+    state.approvals = [];
+    state.routines = [];
+    state.events = [];
+    state.editingId = null;
+    imgCache.clear();
+    snapCache = { key: "", url: "", at: 0 };
+    hideCameraToken();
+    $("#job-area").hidden = true;
+    $("#answer-card").hidden = true;
+    $("#answer-tools").hidden = true;
+    setAskBusy(false);
+    const dialog = $("#object-dialog");
+    if (dialog.open || dialog.hasAttribute("open")) closeDialog();
+  }
+
+  function switchHousehold(id) {
+    if (!id || id === state.household) return;
+    state.household = id;
+    store.set(HOME_KEY, id);
+    resetHouseholdState();
+    renderAll();
+    renderEvents();
+    refreshState();
+    refreshEvents();
+    toast(`Switched to ${householdName(id)}.`);
   }
 
   function startPolling() {
@@ -253,8 +534,12 @@
   }
 
   async function refreshState() {
+    const hh = state.household;
     try {
       const d = await api("api/state", { quiet: true });
+      if (state.household !== hh) return; // household switched while this was in flight
+      state.householdInfo = d.household || null;
+      state.devices = Array.isArray(d.devices) ? d.devices : [];
       state.device = d.device || null;
       state.objects = Array.isArray(d.objects) ? d.objects : [];
       state.alerts = Array.isArray(d.alerts) ? d.alerts : [];
@@ -265,15 +550,19 @@
   }
 
   async function refreshEvents() {
+    const hh = state.household;
     try {
       const d = await api("api/events?limit=50", { quiet: true });
+      if (state.household !== hh) return;
       state.events = Array.isArray(d.events) ? d.events : [];
       renderEvents();
     } catch { /* handled in api() */ }
   }
 
   function renderAll() {
+    renderHouseholdControls();
     renderHeader();
+    renderCameras();
     renderRoom();
     renderObjects();
     renderAlerts();
@@ -288,15 +577,19 @@
   function renderHeader() {
     const d = state.device;
     const pill = $("#device-pill");
+    const name = d ? (d.name || d.id || "") : "";
+    const named = name ? ` · ${name}` : "";
     if (!d) {
       pill.className = "pill pill-muted";
       pill.textContent = "Camera not connected yet";
     } else if (d.online) {
       pill.className = "pill pill-online";
-      pill.textContent = `Camera online · seen ${relTime(d.last_heartbeat)}`;
+      pill.textContent = `Camera online${named} · seen ${relTime(d.last_heartbeat)}`;
     } else {
       pill.className = "pill pill-offline";
-      pill.textContent = d.last_heartbeat ? `Camera offline · last seen ${relTime(d.last_heartbeat)}` : "Camera offline";
+      pill.textContent = d.last_heartbeat
+        ? `Camera offline${named} · last seen ${relTime(d.last_heartbeat)}`
+        : `Camera offline${named}`;
     }
 
     const now = Date.now() / 1000;
@@ -304,6 +597,69 @@
     const badge = $("#alerts-badge");
     badge.hidden = today === 0;
     $("#alerts-badge-text").textContent = `${plural(today, "alert")} today`;
+  }
+
+  // ---------- Cameras ----------
+
+  function renderCameras() {
+    const list = $("#cameras-list");
+    const demo = isDemo();
+    const devices = state.devices.slice().sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)));
+    if (!devices.length) {
+      const msg = demo ? "The replay camera hasn't checked in yet." : "No cameras connected yet.";
+      setHtml(list, `<li class="empty">${esc(msg)}</li>`);
+    } else {
+      setHtml(list, devices.map((d) => {
+        const online = !!d.online;
+        return `<li class="camera-item">
+          <div class="camera-head">
+            <strong>${esc(d.name || d.id)}</strong>
+            <span class="pill ${online ? "pill-online" : "pill-offline"}">${online ? "Online" : "Offline"}</span>
+          </div>
+          <p class="ev-time">Last heartbeat ${timeTag(d.last_heartbeat)}</p>
+        </li>`;
+      }).join(""));
+    }
+    const h = currentHousehold();
+    const owner = !!(h && h.role === "owner");
+    $("#camera-demo-note").hidden = !demo;
+    $("#camera-add").hidden = demo || !owner;
+    $("#camera-member-note").hidden = demo || owner || !h;
+  }
+
+  function showCameraToken(d) {
+    const panel = $("#camera-token-panel");
+    $("#camera-token-name").textContent = (d.device && (d.device.name || d.device.id)) || "camera";
+    $("#camera-token").value = d.token || "";
+    $("#camera-command").textContent = d.run_command || "";
+    panel.hidden = false;
+    $("#camera-token-title").focus();
+  }
+
+  function hideCameraToken() {
+    $("#camera-token").value = "";
+    $("#camera-command").textContent = "";
+    $("#camera-token-panel").hidden = true;
+  }
+
+  async function copyText(text, label) {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(`${label} copied.`);
+      return;
+    } catch { /* fall back below */ }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+    ta.remove();
+    toast(ok ? `${label} copied.` : "Couldn't copy automatically. Select the text and copy it.");
   }
 
   // ---------- Room view ----------
@@ -924,22 +1280,46 @@
   // ---------- Event wiring ----------
 
   function bind() {
-    $("#login-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const value = $("#token-input").value.trim();
-      if (!value) return;
-      state.token = value;
+    $("#login-btn").addEventListener("click", async () => {
+      const btn = $("#login-btn");
+      btn.disabled = true;
       try {
-        await api("api/state", { quiet: true });
-        store.set("icamfind.token", value);
-        $("#token-input").value = "";
-        startApp();
-      } catch (err) {
-        if (err && err.message !== "unauthorized") showLogin("Couldn't reach iCamFind. Check the address and your connection.");
+        await beginLogin();
+      } catch {
+        btn.disabled = false;
+        showLogin("Couldn't start sign-in in this browser. Please try again.");
       }
     });
 
-    $("#logout-btn").addEventListener("click", () => logout(""));
+    $("#logout-btn").addEventListener("click", signOut);
+
+    $("#household-select").addEventListener("change", (e) => switchHousehold(e.target.value));
+
+    $("#camera-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = $("#camera-name").value.trim();
+      if (!name) return;
+      const btn = e.target.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      const hh = state.household;
+      try {
+        const d = await api("api/devices", { method: "POST", body: { name } });
+        if (state.household === hh) {
+          $("#camera-name").value = "";
+          showCameraToken(d);
+          refreshState();
+        }
+      } catch { /* toast shown */ } finally {
+        btn.disabled = false;
+      }
+    });
+    $("#copy-token-btn").addEventListener("click", () => copyText($("#camera-token").value, "Token"));
+    $("#copy-command-btn").addEventListener("click", () => copyText($("#camera-command").textContent, "Command"));
+    $("#camera-token").addEventListener("focus", (e) => e.target.select());
+    $("#token-done-btn").addEventListener("click", () => {
+      hideCameraToken();
+      $("#camera-name").focus();
+    });
 
     $("#large-text-toggle").addEventListener("click", () => {
       const on = !document.documentElement.classList.contains("large");
@@ -1118,19 +1498,19 @@
     $("#alerts-badge").addEventListener("click", () => setTimeout(() => $("#alerts").focus(), 0));
 
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden && state.token && !$("#app").hidden) { refreshState(); refreshEvents(); }
+      if (!document.hidden && state.auth && !$("#app").hidden) { refreshState(); refreshEvents(); }
     });
   }
 
-  function init() {
-    // Judges can open the page as …/#token=XYZ; store it and strip it from the address bar.
-    const m = location.hash.match(/(?:^#|&)token=([^&]+)/);
-    if (m) {
-      store.set("icamfind.token", decodeURIComponent(m[1]));
-      try { history.replaceState(null, "", location.pathname + location.search); } catch { location.hash = ""; }
-    }
-    state.token = store.get("icamfind.token");
+  async function loadConfig() {
+    const res = await fetch("config.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(`config ${res.status}`);
+    const cfg = await res.json();
+    if (!cfg || !cfg.cognito_domain || !cfg.client_id || !cfg.redirect_uri) throw new Error("config incomplete");
+    return Object.assign({}, cfg, { cognito_domain: String(cfg.cognito_domain).replace(/\/+$/, "") });
+  }
 
+  async function init() {
     let tz = "UTC";
     try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { /* keep UTC */ }
     $("#routine-tz").value = tz;
@@ -1141,7 +1521,32 @@
     setupMic();
     applyLargeText(store.get("icamfind.large") === "1");
 
-    if (state.token) startApp(); else showLogin("");
+    state.auth = loadAuth();
+    const params = new URLSearchParams(location.search);
+    const returning = params.has("code") || params.has("error");
+    if (returning) showLoginStatus("Signing you in…");
+
+    try {
+      state.config = await loadConfig();
+    } catch {
+      showLogin("Couldn't load the sign-in settings. Please reload the page.");
+      return;
+    }
+
+    if (returning) {
+      try {
+        if (params.has("error")) throw new Error(params.get("error_description") || "Sign-in was cancelled.");
+        await handleCallback(params);
+      } catch (err) {
+        saveAuth(null);
+        showLogin((err && err.message) || "Sign-in failed. Please try again.");
+        return;
+      } finally {
+        try { history.replaceState(null, "", location.pathname + location.hash); } catch { /* keep URL */ }
+      }
+    }
+
+    if (state.auth) startApp(); else showLogin("");
   }
 
   init();

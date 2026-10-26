@@ -72,26 +72,40 @@ python scripts/deploy.py --region ap-southeast-2 [--caregiver-email you@example.
 ```
 
 This bundles the Lambda code, uploads it with `aws cloudformation package`, deploys
-`cloud/template.yaml`, and writes `.icamfind.env` with the web-app URL and a randomly generated
-access token. Keep that file private. If you pass `--caregiver-email`, confirm the SNS subscription
-email that arrives.
+`cloud/template.yaml`, and writes `.icamfind.env` (keep it private) with the URL and Cognito IDs.
+The stack includes:
+- **Cognito sign-up and sign-in**;
+- a **shared Demo home** fed by a Graviton EC2 **replay camera**, which runs the same OpenCV
+  pipeline on `--demo-clip` (default: a benchmark clip; record your own room with
+  `python -m icamfind record`);
+- everything else in the architecture diagram.
 
-### 2. Set up the camera
+To create a ready-made account (e.g. for judges), run
+`python scripts/create_user.py --email judges@icamfind.example`. If you pass `--caregiver-email`,
+confirm the SNS subscription email that arrives.
+
+### 2. Sign in and connect a camera
+
+Open the web-app URL and choose **Sign in or create an account**. Every account gets a private
+**My home** and can also open the shared **Demo home**. In My home, go to **Cameras → Add a
+camera**. It shows a one-time device token and the exact command to run, for example:
 
 ```bash
 cp config.example.json config.json
 python -m icamfind calibrate      # click polygons for desk / shelf / door, press m for the room map
-python -m icamfind run            # preview window; q quits, r re-learns the background
+ICAMFIND_API_URL=https://<api> ICAMFIND_DEVICE_TOKEN=icf_... python -m icamfind run
 ```
+
+(PowerShell: `$env:ICAMFIND_API_URL='...'; $env:ICAMFIND_DEVICE_TOKEN='icf_...'; python -m icamfind run`.)
+In the preview window, `q` quits and `r` re-learns the background.
 
 A CCTV stream works as well: `python -m icamfind run --source rtsp://user:pass@camera/stream`.
 A recorded clip can stand in for a camera: `--source clips/demo.mp4`, or replay the benchmark scene with its zones: `python -m icamfind run --config config.synthetic.json`.
-Without `.icamfind.env` the device runs **local-only**, still remembering and alerting.
+Without a device token the camera runs **local-only**, still remembering and alerting.
 
 ### 3. Use it
 
-Open the URL from `.icamfind.env` and enter the access token. You can also open `<url>/#token=<token>`
-once; the app stores the token and removes it from the address bar. Then:
+In the web app:
 - put an object down, wait about 2 seconds after your hand leaves, and watch it appear;
 - ask "Where is my wallet?" by voice or text;
 - add a routine (object + time window) and press **Check now** to see the reminder and escalation flow.
@@ -114,6 +128,9 @@ python scripts/e2e.py ask "Where are my keys?"                  # live agent tra
   (crops, snapshots, live checks). Full frames and video are never uploaded.
 - Claude runs on Amazon Bedrock with the `au.` geographic inference profile. Bedrock does not store
   prompts or outputs and does not use them for training.
+- Accounts use Amazon Cognito, and the API Gateway JWT authorizer verifies every request.
+  Each home's data is partitioned by household in DynamoDB and S3, so other homes are
+  unreachable. Each camera has its own revocable device token, stored only as a SHA-256 hash.
 - Caregiver notifications go through a policy enforced in code. Either a human approves them in the
   app, or a spoken reminder went unanswered past a grace period. The model cannot send email on its own.
 - It's a memory aid, not a safety or medical device. Answers include when the object was last seen,

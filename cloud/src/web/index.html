@@ -11,18 +11,16 @@
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
 
-  <!-- Login: shown until an access code is stored -->
+  <!-- Sign-in: shown until the Cognito hosted UI returns tokens -->
   <section id="login" class="login" aria-labelledby="login-title" hidden>
     <div class="login-card">
       <div class="brand brand-lg"><span class="brand-mark" aria-hidden="true">◉</span> iCamFind</div>
-      <h1 id="login-title">Welcome back</h1>
-      <p class="muted">iCamFind remembers where things were put down. Enter the access code from your setup to continue.</p>
-      <form id="login-form" autocomplete="off">
-        <label for="token-input">Access code</label>
-        <input id="token-input" name="token" type="password" required spellcheck="false" autocapitalize="off">
-        <p id="login-error" class="error-text" role="alert" hidden></p>
-        <button type="submit" class="btn btn-primary btn-block">Continue</button>
-      </form>
+      <h1 id="login-title">Welcome</h1>
+      <p class="muted">iCamFind remembers where everyday things were put down, so you can simply ask where they are.</p>
+      <p id="login-status" class="muted" role="status" hidden></p>
+      <p id="login-error" class="error-text" role="alert" hidden></p>
+      <button id="login-btn" type="button" class="btn btn-primary btn-lg btn-block" disabled>Sign in or create an account</button>
+      <p class="small muted login-note">Judges: use the account in the submission notes, or create your own — every account can explore the shared Demo home.</p>
     </div>
   </section>
 
@@ -30,6 +28,11 @@
     <header class="site-header">
       <div class="header-inner">
         <div class="brand"><span class="brand-mark" aria-hidden="true">◉</span> iCamFind</div>
+        <div id="household-wrap" class="household" hidden>
+          <label for="household-select" class="household-label">Home</label>
+          <select id="household-select"></select>
+          <span id="demo-badge" class="badge-demo" hidden>Demo</span>
+        </div>
         <div class="header-status">
           <span id="device-pill" class="pill pill-muted" role="status">Connecting…</span>
           <a id="alerts-badge" class="pill pill-alert" href="#alerts" hidden>
@@ -37,9 +40,13 @@
           </a>
         </div>
         <div class="header-actions">
+          <span id="user-email" class="user-email small muted" hidden></span>
           <button id="large-text-toggle" class="btn btn-ghost" type="button" aria-pressed="false">Larger text</button>
           <button id="logout-btn" class="btn btn-ghost" type="button">Sign out</button>
         </div>
+      </div>
+      <div id="demo-banner" class="demo-banner" role="note" hidden>
+        <p>You're in the shared Demo home. Its camera replays a recorded room around the clock, so you can try every feature. Switch to My home to connect your own camera.</p>
       </div>
     </header>
 
@@ -149,6 +156,49 @@
               <button class="btn btn-primary" type="submit">Save routine</button>
             </form>
           </details>
+        </section>
+
+        <!-- Cameras -->
+        <section id="cameras" class="card span-3" aria-labelledby="cameras-title">
+          <div class="card-head">
+            <h2 id="cameras-title">Cameras</h2>
+          </div>
+          <div class="cameras-grid">
+            <div>
+              <h3 class="visually-hidden">Connected cameras</h3>
+              <ul id="cameras-list" class="plain-list"></ul>
+            </div>
+            <div>
+              <p id="camera-demo-note" class="muted" hidden>This home's camera is a replay running in the cloud: the same OpenCV pipeline watches a recorded room around the clock, so questions, live camera checks and routines all work here. To connect a real camera, switch to My home.</p>
+              <p id="camera-member-note" class="muted" hidden>Only the owner of this home can add cameras.</p>
+
+              <div id="camera-add" hidden>
+                <h3>Add a camera</h3>
+                <p class="muted small">Run iCamFind on a computer next to a webcam or CCTV camera. Name the camera, then copy the command it gives you.</p>
+                <form id="camera-form" class="stack">
+                  <label for="camera-name">Camera name</label>
+                  <input id="camera-name" type="text" required maxlength="60" placeholder="Living room">
+                  <button class="btn btn-primary" type="submit">Create camera token</button>
+                </form>
+              </div>
+
+              <div id="camera-token-panel" class="token-panel" role="region" aria-labelledby="camera-token-title" hidden>
+                <h3 id="camera-token-title" tabindex="-1">Camera “<span id="camera-token-name"></span>” is ready</h3>
+                <p class="warning"><strong>This token is shown once. Anyone with it can send events to this home.</strong></p>
+                <label for="camera-token">Camera token</label>
+                <div class="token-row">
+                  <input id="camera-token" type="text" readonly spellcheck="false" autocomplete="off">
+                  <button id="copy-token-btn" class="btn" type="button">Copy</button>
+                </div>
+                <p class="field-label" id="camera-command-label">Command to run on the camera computer</p>
+                <pre class="command" aria-labelledby="camera-command-label"><code id="camera-command"></code></pre>
+                <div class="token-actions">
+                  <button id="copy-command-btn" class="btn" type="button">Copy command</button>
+                  <button id="token-done-btn" class="btn btn-primary" type="button">Done, I saved it</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
       </div>
     </main>

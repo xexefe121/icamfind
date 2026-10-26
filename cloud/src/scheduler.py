@@ -53,8 +53,9 @@ def taken_in_window(routine: dict, now: datetime) -> bool:
 
 def handler(event, context):
     started = 0
-    for routine in store.list_routines():
+    for routine in store.all_routines():
         try:
+            store.set_household(routine["household"])
             tz = ZoneInfo(routine.get("tz", "UTC"))
             now = datetime.now(tz)
             if not needs_check(routine, now):

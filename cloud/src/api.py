@@ -1,9 +1,15 @@
-"""HTTP API for the edge device and the web app (API Gateway HTTP API, payload format 2.0)."""
+"""HTTP API for edge devices and signed-in users (API Gateway HTTP API, payload format 2.0).
+
+Auth:
+  * /api/device/*  edge devices, `x-icamfind-device-token` (hash lookup -> household + device)
+  * /api/*         people, Cognito ID token verified by the API Gateway JWT authorizer; the household
+                   comes from `x-icamfind-household` and must be one the user belongs to
+  * static files and /config.json are public
+"""
 
 from __future__ import annotations
 
 import base64
-import hmac
 import json
 import logging
 import os
@@ -18,8 +24,11 @@ import store
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
-TOKEN = os.environ.get("ACCESS_TOKEN", "")
 AGENT_FUNCTION = os.environ.get("AGENT_FUNCTION", "")
+COGNITO_DOMAIN = os.environ.get("COGNITO_DOMAIN", "")
+CLIENT_ID = os.environ.get("USER_POOL_CLIENT_ID", "")
+API_URL = os.environ.get("API_URL", "")
+DEMO_DEVICE_TOKEN_SHA256 = os.environ.get("DEMO_DEVICE_TOKEN_SHA256", "")
 WEB_DIR = Path(__file__).parent / "web"
 _lambda = boto3.client("lambda", region_name=store.REGION)
 
@@ -28,8 +37,15 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("inde
 SECURITY_HEADERS = {
     "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "x-frame-options": "DENY",
     "content-security-policy": "default-src 'self'; img-src 'self' https: data: blob:; "
-                               "style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
+                               "style-src 'self' 'unsafe-inline'; "
+                               f"connect-src 'self' https://*.amazoncognito.com; frame-ancestors 'none'",
 }
+
+
+class HttpError(Exception):
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
 
 
 def _resp(status: int, body, headers: dict | None = None) -> dict:
@@ -64,17 +80,17 @@ def _start_agent(job: dict, tz: str | None = None) -> None:
                    Payload=json.dumps({"job": job, "tz": tz}).encode())
 
 
-# ------------------------------------------------------------------ edge routes
+# ------------------------------------------------------------------ device routes
 
-def post_event(body: dict) -> dict:
-    device, ev = body["device"], body["event"]
+def post_event(device: dict, body: dict) -> dict:
+    ev = body["event"]
     crop_key = None
     if body.get("crop_b64"):
-        crop_key = store.put_image(f"crops/{device}/{time.strftime('%Y/%m/%d')}/{ev['id']}.jpg", body["crop_b64"])
+        crop_key = store.put_image(f"crops/{time.strftime('%Y/%m/%d')}/{ev['id']}.jpg", body["crop_b64"])
     obj = store.get_object(ev["object_id"]) or {
         "id": ev["object_id"], "label": ev.get("label") or ev.get("local_label") or "object",
         "local_label": ev.get("local_label", "object"), "description": "", "first_seen": ev["ts"],
-        "essential": bool(ev.get("essential")), "device": device,
+        "essential": bool(ev.get("essential")), "device": device["id"],
     }
     # Open-vocabulary naming with Claude vision the first time we see an object.
     if crop_key and ev["type"] in ("placed", "removed") and not obj.get("described"):
@@ -91,50 +107,72 @@ def post_event(body: dict) -> dict:
     if crop_key and (ev["type"] != "removed" or not obj.get("crop_key")):
         obj["crop_key"] = crop_key
     store.put_object(obj)
-    store.put_event({**ev, "label": obj["label"], "crop_key": crop_key, "device": device})
+    store.put_event({**ev, "label": obj["label"], "crop_key": crop_key, "device": device["id"]})
     return _resp(200, {"object": _with_urls(obj)})
 
 
-def post_heartbeat(body: dict) -> dict:
-    device = store.get_device(body["device"]) or {"id": body["device"]}
-    device.update(last_heartbeat=time.time(), zones=body.get("zones", []), door_zone=body.get("door_zone"),
+def post_heartbeat(device: dict, body: dict) -> dict:
+    record = store.get_device(device["id"]) or {"id": device["id"], "name": device.get("name", "Camera")}
+    record.update(last_heartbeat=time.time(), zones=body.get("zones", []), door_zone=body.get("door_zone"),
                   frame_size=body.get("frame_size"), map=body.get("map"))
     if body.get("snapshot_b64"):
-        device["snapshot_key"] = store.put_image(f"snapshots/{body['device']}/{int(time.time())}.jpg",
+        record["snapshot_key"] = store.put_image(f"snapshots/{device['id']}/{int(time.time())}.jpg",
                                                  body["snapshot_b64"])
-        device["snapshot_at"] = time.time()
-    store.put_device(device)
+        record["snapshot_at"] = time.time()
+    store.put_device(record)
     return _resp(200, {"ok": True})
 
 
-def post_result(command_id: str, body: dict) -> dict:
-    image_key = None
-    if body.get("crop_b64"):
-        image_key = store.put_image(f"commands/{command_id}.jpg", body["crop_b64"])
-    store.complete_command(command_id, body.get("result", {}), image_key)
+def post_result(device: dict, command_id: str, body: dict) -> dict:
+    image_key = store.put_image(f"commands/{command_id}.jpg", body["crop_b64"]) if body.get("crop_b64") else None
+    if not store.complete_command(command_id, device["id"], body.get("result", {}), image_key):
+        raise HttpError(404, "command not found")
     return _resp(200, {"ok": True})
 
 
-def post_alert(body: dict) -> dict:
-    alert = {"id": store.new_id("alr"), "kind": body.get("kind", "alert"), "message": body.get("message", ""),
-             "ts": body.get("ts") or time.time(), "objects": body.get("objects", []), "device": body.get("device")}
-    store.put_alert(alert)
+def post_alert(device: dict, body: dict) -> dict:
+    store.put_alert({"id": store.new_id("alr"), "kind": body.get("kind", "alert"), "message": body.get("message", ""),
+                     "ts": body.get("ts") or time.time(), "objects": body.get("objects", []), "device": device["id"]})
     return _resp(200, {"ok": True})
 
 
-# ------------------------------------------------------------------ ui routes
+DEVICE_ROUTES = [
+    ("POST", r"/api/device/events", lambda d, m, b: post_event(d, b)),
+    ("POST", r"/api/device/heartbeat", lambda d, m, b: post_heartbeat(d, b)),
+    ("GET", r"/api/device/commands", lambda d, m, b: _resp(200, {"commands": store.pending_commands(d["id"])})),
+    ("POST", r"/api/device/commands/(cmd_\w+)/result", lambda d, m, b: post_result(d, m[1], b)),
+    ("POST", r"/api/device/alerts", lambda d, m, b: post_alert(d, b)),
+]
 
-def get_state() -> dict:
+
+def authenticate_device(event) -> dict:
+    token = (event.get("headers") or {}).get("x-icamfind-device-token", "")
+    device = store.device_for_token(token)
+    if device is None and token and DEMO_DEVICE_TOKEN_SHA256 and store.token_hash(token) == DEMO_DEVICE_TOKEN_SHA256:
+        store.register_device_token(DEMO_DEVICE_TOKEN_SHA256, store.DEMO_HOUSEHOLD, "dev_demo_replay",
+                                    "Demo replay camera")
+        device = store.device_for_token(token)
+    if device is None:
+        raise HttpError(401, "unauthorized")
+    store.set_household(device["household"])
+    return device
+
+
+# ------------------------------------------------------------------ user routes
+
+def get_state(ctx: dict) -> dict:
     import agent
 
     devices = sorted(store.list_devices(), key=lambda d: d.get("last_heartbeat", 0), reverse=True)
-    device = devices[0] if devices else None
+    for d in devices:
+        d["online"] = agent.device_online(d)
+    device = dict(devices[0]) if devices else None
     if device:
-        device = dict(device)
-        device["online"] = agent.device_online(device)
         device["snapshot_url"] = store.url(device.pop("snapshot_key", None))
     return _resp(200, {
+        "household": ctx["household"],
         "device": device,
+        "devices": [{k: d.get(k) for k in ("id", "name", "online", "last_heartbeat")} for d in devices],
         "objects": [_with_urls(o) for o in store.list_objects()],
         "alerts": store.list_alerts(20),
         "approvals": store.list_approvals("pending"),
@@ -142,19 +180,32 @@ def get_state() -> dict:
     })
 
 
+def get_me(ctx: dict) -> dict:
+    user = ctx["user"]
+    households = []
+    for hid in user.get("households", []):
+        hh = store.get_household(hid)
+        if hh:
+            households.append({"id": hid, "name": hh.get("name"), "demo": bool(hh.get("demo")),
+                               "role": "owner" if hid in user.get("owner_of", []) else "member"})
+    return _resp(200, {"user": {"sub": user["sub"], "email": user.get("email")}, "households": households,
+                       "current": ctx["household"]["id"]})
+
+
 def get_job(job_id: str) -> dict:
     job, steps = store.get_job(job_id)
     if job is None:
-        return _resp(404, {"error": "job not found"})
+        raise HttpError(404, "job not found")
     for s in steps:
         s["image_url"] = store.url(s.pop("image_key", None))
+    job.pop("household", None)
     return _resp(200, {"job": job, "steps": steps})
 
 
 def post_ask(body: dict) -> dict:
     question = (body.get("question") or "").strip()[:500]
     if not question:
-        return _resp(400, {"error": "question required"})
+        raise HttpError(400, "question required")
     job = store.create_job(question, "ask")
     _start_agent(job, body.get("tz"))
     return _resp(200, {"job_id": job["id"]})
@@ -165,7 +216,7 @@ def post_snapshot() -> dict:
 
     device = agent._device()
     if not agent.device_online(device):
-        return _resp(409, {"error": "camera offline"})
+        raise HttpError(409, "camera offline")
     cmd = store.create_command(device["id"], "snapshot", {})
     return _resp(200, {"job_id": cmd["id"]})
 
@@ -173,7 +224,7 @@ def post_snapshot() -> dict:
 def post_object(object_id: str, body: dict) -> dict:
     obj = store.get_object(object_id)
     if obj is None:
-        return _resp(404, {"error": "object not found"})
+        raise HttpError(404, "object not found")
     if "label" in body and str(body["label"]).strip():
         obj["label"] = str(body["label"]).strip()[:60]
         obj["described"] = True
@@ -186,7 +237,7 @@ def post_object(object_id: str, body: dict) -> dict:
 def get_object(object_id: str) -> dict:
     obj = store.get_object(object_id)
     if obj is None:
-        return _resp(404, {"error": "object not found"})
+        raise HttpError(404, "object not found")
     return _resp(200, {"object": _with_urls(obj), "events": [_event_out(e) for e in store.object_events(object_id)]})
 
 
@@ -198,21 +249,27 @@ def post_routine(body: dict) -> dict:
 
     start, end, tz = body.get("start", ""), body.get("end", ""), body.get("tz") or "UTC"
     if not (TIME_RE.match(start) and TIME_RE.match(end)) or not store.get_object(body.get("object_id", "")):
-        return _resp(400, {"error": "need object_id and start/end as HH:MM"})
+        raise HttpError(400, "need object_id and start/end as HH:MM")
     try:
         ZoneInfo(tz)
     except Exception:
-        return _resp(400, {"error": "unknown time zone"})
+        raise HttpError(400, "unknown time zone")
     routine = {"id": store.new_id("rtn"), "object_id": body["object_id"],
                "name": (body.get("name") or "Daily routine")[:80], "start": start, "end": end, "tz": tz,
                "last_status": "pending", "created": time.time()}
     return _resp(200, {"routine": store.put_routine(routine)})
 
 
+def delete_routine(routine_id: str) -> dict:
+    if not store.delete_routine(routine_id):
+        raise HttpError(404, "routine not found")
+    return _resp(200, {"ok": True})
+
+
 def check_routine(routine_id: str) -> dict:
     routine = store.get_routine(routine_id)
     if routine is None:
-        return _resp(404, {"error": "routine not found"})
+        raise HttpError(404, "routine not found")
     job = store.create_job(f"Routine check: {routine['name']}", "routine", {"routine_id": routine_id})
     _start_agent(job, routine.get("tz"))
     return _resp(200, {"job_id": job["id"]})
@@ -223,40 +280,87 @@ def post_approval(approval_id: str, body: dict) -> dict:
 
     approval = store.get_approval(approval_id)
     if approval is None:
-        return _resp(404, {"error": "approval not found"})
+        raise HttpError(404, "approval not found")
     if approval["status"] != "pending":
-        return _resp(409, {"error": f"already {approval['status']}"})
+        raise HttpError(409, f"already {approval['status']}")
     decision = body.get("decision")
     if decision not in ("approve", "deny"):
-        return _resp(400, {"error": "decision must be approve or deny"})
+        raise HttpError(400, "decision must be approve or deny")
     approval["status"] = "approved" if decision == "approve" else "denied"
     approval["decided"] = time.time()
     if decision == "approve":
         agent.send_caregiver(approval["message"])
+        store.put_alert({"id": store.new_id("alr"), "kind": "caregiver_notified", "ts": time.time(),
+                         "message": f"Caregiver notified: {approval['message']}", "objects": []})
     store.put_approval(approval)
     return _resp(200, {"approval": approval})
 
 
-# ------------------------------------------------------------------ router
+def get_devices() -> dict:
+    import agent
 
-ROUTES = [
-    ("POST", r"/api/events", lambda m, b: post_event(b)),
-    ("POST", r"/api/devices/heartbeat", lambda m, b: post_heartbeat(b)),
-    ("GET", r"/api/devices/([\w-]+)/commands", lambda m, b: _resp(200, {"commands": store.pending_commands(m[1])})),
-    ("POST", r"/api/commands/(cmd_\w+)/result", lambda m, b: post_result(m[1], b)),
-    ("POST", r"/api/alerts", lambda m, b: post_alert(b)),
-    ("GET", r"/api/state", lambda m, b: get_state()),
-    ("GET", r"/api/events", None),  # handled specially for query string
-    ("GET", r"/api/objects/(obj_\w+)", lambda m, b: get_object(m[1])),
-    ("POST", r"/api/objects/(obj_\w+)", lambda m, b: post_object(m[1], b)),
-    ("POST", r"/api/ask", lambda m, b: post_ask(b)),
-    ("GET", r"/api/jobs/(job_\w+)", lambda m, b: get_job(m[1])),
-    ("POST", r"/api/snapshot", lambda m, b: post_snapshot()),
-    ("POST", r"/api/routines", lambda m, b: post_routine(b)),
-    ("DELETE", r"/api/routines/(rtn_\w+)", lambda m, b: (store.delete_routine(m[1]), _resp(200, {"ok": True}))[1]),
-    ("POST", r"/api/routines/(rtn_\w+)/check", lambda m, b: check_routine(m[1])),
-    ("POST", r"/api/approvals/(apr_\w+)", lambda m, b: post_approval(m[1], b)),
+    devices = store.list_devices()
+    return _resp(200, {"devices": [{"id": d["id"], "name": d.get("name"), "online": agent.device_online(d),
+                                    "last_heartbeat": d.get("last_heartbeat")} for d in devices]})
+
+
+def post_device(ctx: dict, body: dict) -> dict:
+    hh = ctx["household"]
+    if hh.get("demo") or hh["id"] not in ctx["user"].get("owner_of", []):
+        raise HttpError(403, "only the owner of a private home can add cameras")
+    if len(store.list_devices()) >= 5:
+        raise HttpError(409, "a home can have at most 5 cameras")
+    device, token = store.create_device(str(body.get("name") or "Camera"))
+    command = (f"ICAMFIND_API_URL={API_URL} ICAMFIND_DEVICE_TOKEN={token} python -m icamfind run")
+    return _resp(200, {"device": {"id": device["id"], "name": device["name"]}, "token": token,
+                       "run_command": command,
+                       "run_command_powershell": f"$env:ICAMFIND_API_URL='{API_URL}'; "
+                                                 f"$env:ICAMFIND_DEVICE_TOKEN='{token}'; python -m icamfind run"})
+
+
+USER_ROUTES = [
+    ("GET", r"/api/me", lambda c, m, b: get_me(c)),
+    ("GET", r"/api/state", lambda c, m, b: get_state(c)),
+    ("GET", r"/api/objects/(obj_\w+)", lambda c, m, b: get_object(m[1])),
+    ("POST", r"/api/objects/(obj_\w+)", lambda c, m, b: post_object(m[1], b)),
+    ("POST", r"/api/ask", lambda c, m, b: post_ask(b)),
+    ("GET", r"/api/jobs/(job_\w+)", lambda c, m, b: get_job(m[1])),
+    ("POST", r"/api/snapshot", lambda c, m, b: post_snapshot()),
+    ("POST", r"/api/routines", lambda c, m, b: post_routine(b)),
+    ("DELETE", r"/api/routines/(rtn_\w+)", lambda c, m, b: delete_routine(m[1])),
+    ("POST", r"/api/routines/(rtn_\w+)/check", lambda c, m, b: check_routine(m[1])),
+    ("POST", r"/api/approvals/(apr_\w+)", lambda c, m, b: post_approval(m[1], b)),
+    ("GET", r"/api/devices", lambda c, m, b: get_devices()),
+    ("POST", r"/api/devices", lambda c, m, b: post_device(c, b)),
 ]
+
+
+def authenticate_user(event) -> dict:
+    claims = (event.get("requestContext", {}).get("authorizer", {}) or {}).get("jwt", {}).get("claims") or {}
+    sub = claims.get("sub")
+    if not sub:
+        raise HttpError(401, "unauthorized")  # the JWT authorizer normally rejects before we get here
+    user = store.ensure_user(sub, claims.get("email", ""))
+    requested = (event.get("headers") or {}).get("x-icamfind-household") or user["households"][0]
+    if requested not in user.get("households", []):
+        raise HttpError(403, "not a member of that home")
+    household = store.get_household(requested)
+    if household is None:
+        raise HttpError(404, "home not found")
+    store.set_household(requested)
+    return {"user": user, "household": {"id": requested, "name": household.get("name"),
+                                        "demo": bool(household.get("demo"))}}
+
+
+# ------------------------------------------------------------------ entry point
+
+def _dispatch(routes, method, path, *args):
+    for m_, pattern, fn in routes:
+        if m_ == method:
+            match = re.fullmatch(pattern, path)
+            if match:
+                return fn(*args[:1], match, *args[1:])
+    raise HttpError(404, "not found")
 
 
 def handler(event, context):
@@ -266,25 +370,26 @@ def handler(event, context):
         name, ctype = STATIC[path]
         return {"statusCode": 200, "headers": {"content-type": ctype, "cache-control": "no-cache", **SECURITY_HEADERS},
                 "body": (WEB_DIR / name).read_text(encoding="utf-8")}
+    if method == "GET" and path == "/config.json":
+        return _resp(200, {"cognito_domain": COGNITO_DOMAIN, "client_id": CLIENT_ID, "redirect_uri": f"{API_URL}/",
+                           "region": store.REGION}, {"cache-control": "max-age=300"})
     if not path.startswith("/api/"):
         return _resp(404, {"error": "not found"})
 
-    supplied = (event.get("headers") or {}).get("x-icamfind-token", "")
-    if not TOKEN or not hmac.compare_digest(supplied.encode(), TOKEN.encode()):
-        return _resp(401, {"error": "unauthorized"})
-
     try:
         body = _json(event) if method in ("POST", "PUT") else {}
+        if path.startswith("/api/device/"):
+            device = authenticate_device(event)
+            return _dispatch(DEVICE_ROUTES, method, path, device, body)
         if method == "GET" and path == "/api/events":
+            authenticate_user(event)
             qs = event.get("queryStringParameters") or {}
             limit = max(1, min(200, int(qs.get("limit", 50))))
             return _resp(200, {"events": [_event_out(e) for e in store.recent_events(limit)]})
-        for m_, pattern, fn in ROUTES:
-            if m_ == method and fn is not None:
-                match = re.fullmatch(pattern, path)
-                if match:
-                    return fn(match, body)
-        return _resp(404, {"error": "not found"})
+        ctx = authenticate_user(event)
+        return _dispatch(USER_ROUTES, method, path, ctx, body)
+    except HttpError as exc:
+        return _resp(exc.status, {"error": str(exc)})
     except (KeyError, ValueError, TypeError) as exc:
         log.warning("bad request %s %s: %s", method, path, exc)
         return _resp(400, {"error": f"bad request: {exc}"})

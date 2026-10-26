@@ -60,8 +60,8 @@
 
   <rect x="514" y="104" width="300" height="76" class="box"/>
   <text x="530" y="127" class="t">API Gateway HTTP API</text>
-  <text x="530" y="147" class="s">token auth, throttling, serves web app</text>
-  <text x="530" y="165" class="s">routes: events, heartbeat, commands, ask</text>
+  <text x="530" y="147" class="s">Cognito JWT authorizer, throttling, web app</text>
+  <text x="530" y="165" class="s">device routes: per-camera token (hashed)</text>
 
   <rect x="514" y="200" width="300" height="76" class="box"/>
   <text x="530" y="223" class="t">Lambda "api" (Python 3.12, Graviton arm64)</text>
@@ -99,16 +99,17 @@
   <text x="872" y="453" class="s">caregiver email after approval / escalation</text>
 
   <rect x="514" y="500" width="642" height="70" class="box"/>
-  <text x="530" y="523" class="t">Observability and operations</text>
-  <text x="530" y="543" class="s">CloudWatch JSON logs (30-day retention), X-Ray tracing, agent-error alarm,</text>
-  <text x="530" y="561" class="s">every agent step persisted and shown in the app ("How I found this")</text>
+  <text x="530" y="523" class="t">Accounts and the shared Demo home</text>
+  <text x="530" y="543" class="s">Amazon Cognito user pool + hosted UI (PKCE); data partitioned per household</text>
+  <text x="530" y="561" class="s">EC2 Graviton replay camera runs the same OpenCV pipeline 24/7 for the Demo home</text>
 
   <rect x="514" y="590" width="642" height="128" class="box"/>
   <text x="530" y="613" class="t">Web app (served by the API, no build step)</text>
   <text x="530" y="633" class="s">Ask by voice or text, live agent trace with camera crops, room view with zones,</text>
   <text x="530" y="651" class="s">objects + history timeline, routines, caregiver approvals, alerts.</text>
   <text x="530" y="669" class="s">Large-text mode, high contrast, keyboard operable, read-aloud answers.</text>
-  <text x="530" y="697" class="s" font-style="italic">Users: person with memory loss (asks), caregiver (routines + approvals)</text>
+  <text x="530" y="689" class="s">Ops: CloudWatch JSON + API access logs, X-Ray, alarm; every agent step stored</text>
+  <text x="530" y="708" class="s" font-style="italic">Users: person with memory loss (asks), caregiver (routines + approvals)</text>
 
   <!-- arrows -->
   <path class="l" d="M426,690 C470,690 470,142 514,142"/>

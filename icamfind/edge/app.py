@@ -84,14 +84,14 @@ class EdgeApp:
         self.cfg = cfg
         self.show = show
         self.geometry = RoomGeometry(cfg)
-        self.detector = YoloxDetector(cfg.model_path)
+        self.detector = YoloxDetector(cfg.model_path) if cfg.use_dnn else None
         self.scene = SceneMemory(cfg, self.geometry, self.detector)
         restored = self.scene.load(cfg.data_dir)
         if restored:
             log.info("restored %d remembered objects", restored)
-        self.uplink = Uplink(cfg.api_url, cfg.api_token, cfg.device_id, cfg.data_dir)
+        self.uplink = Uplink(cfg.api_url, cfg.device_token, cfg.device_id, cfg.data_dir)
         self.speaker = Speaker(cfg.speak)
-        self.worker = PersonWorker(self.detector, cfg.person_interval)
+        self.worker = PersonWorker(self.detector, cfg.person_interval) if self.detector else None
         self.commands: queue.Queue = queue.Queue()
         self.frame: np.ndarray | None = None
         self.frame_size = (0, 0)
@@ -202,7 +202,8 @@ class EdgeApp:
     def run(self, max_seconds: float | None = None) -> None:
         cap = open_source(self.cfg.source)
         started = time.time()
-        self.worker.start()
+        if self.worker:
+            self.worker.start()
         self.uplink.start()
         if self.uplink.enabled:
             threading.Thread(target=self._cloud_loop, name="cloud", daemon=True).start()
@@ -215,15 +216,25 @@ class EdgeApp:
         file_dt = 1.0 / (cap.get(cv.CAP_PROP_FPS) or 15.0) if is_file else 0.0
         fps = 0.0
         last = time.time()
+        hold_until, last_raw = 0.0, None
         try:
             while True:
-                ok, raw = cap.read()
+                if is_file and time.time() < hold_until and last_raw is not None:
+                    ok, raw = True, last_raw  # replay pause: the scene stays still, like a quiet room
+                else:
+                    ok, raw = cap.read()
                 if not ok:
+                    if is_file and self.cfg.replay_pause_seconds > 0 and hold_until == 0.0 and last_raw is not None:
+                        hold_until = time.time() + self.cfg.replay_pause_seconds
+                        log.info("end of clip; holding the last frame for %.0f s", self.cfg.replay_pause_seconds)
+                        continue
                     log.warning("end of clip; replaying" if is_file else "frame grab failed; reconnecting")
                     cap.release()
+                    hold_until = 0.0
                     time.sleep(0.2 if is_file else 1.0)
                     cap = open_source(self.cfg.source)
                     continue
+                last_raw = raw
                 t = time.time()
                 if max_seconds and t - started > max_seconds:
                     break
@@ -238,10 +249,11 @@ class EdgeApp:
                 self.frame = frame
                 self.frame_size = (frame.shape[1], frame.shape[0])
 
-                self.worker.submit(frame, t)
-                dets, det_t = self.worker.result
-                if det_t:
-                    self.scene.update_persons(dets, det_t)
+                if self.worker:
+                    self.worker.submit(frame, t)
+                    dets, det_t = self.worker.result
+                    if det_t:
+                        self.scene.update_persons(dets, det_t)
 
                 for ev in self.scene.process(frame, t):
                     self._publish(ev)
@@ -254,7 +266,8 @@ class EdgeApp:
                     view = frame.copy()
                     self.geometry.draw(view)
                     self.scene.draw(view, t)
-                    status = (f"{fps:4.1f} fps | dnn {self.worker.latency * 1000:.0f} ms | objects "
+                    dnn_ms = self.worker.latency * 1000 if self.worker else 0
+                    status = (f"{fps:4.1f} fps | dnn {dnn_ms:.0f} ms | objects "
                               f"{sum(o.status == 'present' for o in self.scene.objects.values())} | cloud "
                               f"{'on' if self.uplink.online else ('off' if self.uplink.enabled else 'local')}")
                     cv.putText(view, status, (8, view.shape[0] - 10), cv.FONT_HERSHEY_SIMPLEX, 0.45,

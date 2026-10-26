@@ -113,7 +113,9 @@ local-only, still remembering and still giving door alerts through text-to-speec
 | Amazon Bedrock | **Claude Haiku 4.5 via the `au.` geographic inference profile**, so processing stays in Australia. Used for crop naming and the agent. Client-side fallback to Sonnet 4.6 (`au.`) on access errors or refusals. Models are configurable by stack parameter |
 | EventBridge | `rate(5 minutes)` routine sweep |
 | SNS (KMS) | Caregiver email, sent only after approval or escalation |
-| CloudWatch / X-Ray | JSON logs with 30-day retention, active tracing, an alarm on agent errors |
+| CloudWatch / X-Ray | JSON logs with 30-day retention, API access logs, active tracing, an alarm on agent errors |
+| Amazon Cognito | Sign-up/sign-in (hosted UI, PKCE) and JWT authorizer on the HTTP API |
+| EC2 (t4g.small, Graviton) + Secrets Manager + SSM | The **Demo home replay camera**: the unmodified edge pipeline replays a recorded room 24/7, so judges can test live verification without hardware. It has no inbound ports and is managed through SSM Session Manager |
 
 **Open-vocabulary naming:** COCO has no "keys" or "pill bottle" class. When an object is first seen,
 the `api` Lambda sends its privacy-filtered crop to Claude, which returns
@@ -160,9 +162,16 @@ camera):
      period had not elapsed → `escalated`, with an approval card in the app.
 
 ### 4.3 Security and reproducibility
-- **Access token:** shared, `x-icamfind-token`, compared in constant time. Generated at deploy, a
-  NoEcho parameter, stored only in the Lambda environment and in the local `.icamfind.env`, which
-  git ignores.
+- **People:** Amazon Cognito user pool with email verification and the hosted UI (authorization
+  code + PKCE; tokens last 60 min, refresh tokens 30 days). The API Gateway JWT authorizer
+  verifies every `/api/*` request before the Lambda runs.
+- **Tenancy:** each account owns a private household. All DynamoDB keys are prefixed with the
+  household id, S3 images live under a per-household prefix, and globally addressed items (jobs,
+  commands, approvals, routines) are checked on read. Selecting a home the user doesn't belong to
+  returns 403.
+- **Cameras:** each camera has its own random device token, shown once and stored only as a
+  SHA-256 hash. The demo replay camera's token sits in AWS Secrets Manager and is read by the EC2
+  instance role.
 - **IAM:** least privilege through SAM policy templates per function, plus Bedrock invoke actions.
 - **Web app hardening:** strict security headers and CSP. All server strings are escaped in the UI.
 - **Reproducible deploy:** pinned Python dependencies (`requirements*.txt`), the model checksum in
@@ -195,8 +204,26 @@ Ground truth is the time the hand leaves. A detection matches if it reports the 
 | Lighting jumps | each clip's lights-on jump triggered exactly one re-baseline |
 | Scene-logic cost | 23-38 ms per frame median, laptop CPU |
 
-Full per-clip table and failure list: [EVALUATION.md](EVALUATION.md). Component contributions:
-[ABLATION.md](ABLATION.md).
+Full per-clip table and failure list: [EVALUATION.md](EVALUATION.md).
+
+**Ablation** ([ABLATION.md](ABLATION.md), same 5 clips):
+
+| Variant | F1 | Identity kept |
+|---|---|---|
+| Full pipeline | 0.977 | 20/20 |
+| Short stability window (0.4 s) | 0.683 (102 predictions for 65 events) | 17/20 |
+| No ghost test | 0.916 | 20/20 |
+| No re-identification | 0.916 | 10/20 |
+| No lighting guard | 0.977 | 20/20 |
+
+- **Stability window:** waiting for the hand to leave matters most. Committing too early records
+  hands and half-placed objects.
+- **Ghost test:** without it, every pre-existing object that is taken away shows up as a phantom
+  "placed".
+- **Re-identification:** without it, half of the identities break.
+- **Lighting guard:** no measurable effect on this benchmark. The full-frame lights jump is already
+  absorbed by the large-region rule (any region over 25% of the frame is treated as scene change).
+  The guard is meant for partial lighting changes, which this benchmark does not test.
 
 ### 5.2 Failure cases observed
 - **Seed 2:** the pre-existing object's removal was reported as "placed" (one miss, one false

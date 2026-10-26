@@ -1,0 +1,173 @@
+[
+ {
+  "id": "obj_f491446a1c",
+  "label": "throw pillow",
+  "local_label": "object",
+  "confidence": 0.0,
+  "box": [
+   288,
+   319,
+   60,
+   41
+  ],
+  "zone": "desk",
+  "map_xy": null,
+  "status": "present",
+  "first_seen": 1793016877.5393121,
+  "last_seen": 1793017038.3311973,
+  "essential": false,
+  "removed_at": null
+ },
+ {
+  "id": "obj_f15c2f778b",
+  "label": "scented candle",
+  "local_label": "cake",
+  "confidence": 0.323,
+  "box": [
+   563,
+   86,
+   45,
+   51
+  ],
+  "zone": "shelf",
+  "map_xy": null,
+  "status": "present",
+  "first_seen": 1793016885.5531547,
+  "last_seen": 1793017045.6097584,
+  "essential": false,
+  "removed_at": null
+ },
+ {
+  "id": "obj_c48fe84591",
+  "label": "cooking pot",
+  "local_label": "object",
+  "confidence": 0.0,
+  "box": [
+   315,
+   274,
+   65,
+   25
+  ],
+  "zone": "desk",
+  "map_xy": null,
+  "status": "present",
+  "first_seen": 1793016893.1364923,
+  "last_seen": 1793016942.6488702,
+  "essential": false,
+  "removed_at": null
+ },
+ {
+  "id": "obj_55bdf40da9",
+  "label": "green mat",
+  "local_label": "object",
+  "confidence": 0.0,
+  "box": [
+   94,
+   267,
+   112,
+   80
+  ],
+  "zone": "desk",
+  "map_xy": null,
+  "status": "present",
+  "first_seen": 1793016900.6872203,
+  "last_seen": 1793016956.2203887,
+  "essential": false,
+  "removed_at": null
+ },
+ {
+  "id": "obj_466dd29c72",
+  "label": "area rug",
+  "local_label": "object",
+  "confidence": 0.0,
+  "box": [
+   299,
+   299,
+   62,
+   42
+  ],
+  "zone": "desk",
+  "map_xy": null,
+  "status": "present",
+  "first_seen": 1793016914.4735186,
+  "last_seen": 1793017074.2514715,
+  "essential": false,
+  "removed_at": null
+ },
+ {
+  "id": "obj_b3c509657f",
+  "label": "gold bar",
+  "local_label": "object",
+  "confidence": 0.0,
+  "box": [
+   585,
+   301,
+   28,
+   48
+  ],
+  "zone": "side table",
+  "map_xy": null,
+  "status": "present",
+  "first_seen": 1793016969.8192368,
+  "last_seen": 1793016969.8192368,
+  "essential": false,
+  "removed_at": null
+ },
+ {
+  "id": "obj_9a35d5fc5d",
+  "label": "coffee mug",
+  "local_label": "object",
+  "confidence": 0.0,
+  "box": [
+   304,
+   359,
+   29,
+   19
+  ],
+  "zone": "desk",
+  "map_xy": null,
+  "status": "present",
+  "first_seen": 1793016977.6091573,
+  "last_seen": 1793017045.6767135,
+  "essential": false,
+  "removed_at": null
+ },
+ {
+  "id": "obj_3ad6c127b0",
+  "label": "cooking pot",
+  "local_label": "object",
+  "confidence": 0.0,
+  "box": [
+   490,
+   157,
+   64,
+   25
+  ],
+  "zone": "shelf",
+  "map_xy": null,
+  "status": "present",
+  "first_seen": 1793017052.8451087,
+  "last_seen": 1793017052.8451087,
+  "essential": false,
+  "removed_at": null
+ },
+ {
+  "id": "obj_ceca12a9d8",
+  "label": "green book",
+  "local_label": "object",
+  "confidence": 0.0,
+  "box": [
+   449,
+   309,
+   112,
+   80
+  ],
+  "zone": "side table",
+  "map_xy": null,
+  "status": "present",
+  "first_seen": 1793017060.4162867,
+  "last_seen": 1793017060.4162867,
+  "essential": false,
+  "removed_at": null
+ }
+]

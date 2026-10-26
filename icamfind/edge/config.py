@@ -57,11 +57,13 @@ class Config:
     # Privacy: blur people in every image that leaves the device.
     blur_people: bool = True
 
-    # Cloud.
+    # Cloud: the API URL and this camera's device token (from "Add a camera" in the web app).
     api_url: str | None = None
-    api_token: str | None = None
+    device_token: str | None = None
     data_dir: str = "data"
     model_path: str = "models/object_detection_yolox_2022nov.onnx"
+    use_dnn: bool = True  # people masking + label hints; off for people-free replays on small CPUs
+    replay_pause_seconds: float = 0.0  # recorded clips: hold the last frame this long before replaying
     speak: bool = True
 
     @classmethod
@@ -77,7 +79,7 @@ class Config:
         # Environment overrides keep secrets out of config files.
         load_env_file()
         cfg.api_url = os.environ.get("ICAMFIND_API_URL", cfg.api_url)
-        cfg.api_token = os.environ.get("ICAMFIND_TOKEN", cfg.api_token)
+        cfg.device_token = os.environ.get("ICAMFIND_DEVICE_TOKEN", cfg.device_token)
         if isinstance(cfg.source, str) and cfg.source.isdigit():
             cfg.source = int(cfg.source)
         return cfg
@@ -85,5 +87,5 @@ class Config:
     def save(self, path: str | os.PathLike | None = None) -> None:
         path = Path(path or DEFAULT_CONFIG_PATH)
         data = asdict(self)
-        data.pop("api_token", None)  # never persist the secret
+        data.pop("device_token", None)  # never persist the secret
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
