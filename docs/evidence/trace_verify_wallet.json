@@ -1,0 +1,179 @@
+{
+ "job": {
+  "answer": "Your leather wallet is on the shelf — I can see it there right now. 😊",
+  "confidence": "high",
+  "created": 1793014274.30468,
+  "finished": 1793014284.263695,
+  "id": "job_25d0a3f549",
+  "mode": "ask",
+  "model": "global.anthropic.claude-opus-4-6-v1",
+  "object_id": "obj_2d8547771b",
+  "question": "Where is my leather wallet?",
+  "status": "done"
+ },
+ "steps": [
+  {
+   "ts": 1793014276.940806,
+   "kind": "thought",
+   "text": "Let me check my memory for your wallet.",
+   "n": 1
+  },
+  {
+   "ts": 1793014276.998565,
+   "kind": "tool_call",
+   "input": {},
+   "tool": "list_objects",
+   "n": 2
+  },
+  {
+   "ts": 1793014277.037086,
+   "kind": "tool_result",
+   "output": {
+    "now": "Monday 21:31",
+    "objects": [
+     {
+      "description": "A black elastic hair tie with a round shape.",
+      "essential": false,
+      "label": "hair tie",
+      "last_event": "placed",
+      "last_seen": "30 seconds ago",
+      "object_id": "obj_a98ed8ba63",
+      "status": "present",
+      "zone": "side table"
+     },
+     {
+      "description": "A rectangular bright green cleaning sponge with a slightly textured surface.",
+      "essential": false,
+      "label": "green sponge",
+      "last_event": "placed",
+      "last_seen": "37 seconds ago",
+      "object_id": "obj_ffee066984",
+      "status": "present",
+      "zone": "desk"
+     },
+     {
+      "description": "A round, pale pink spherical bath bomb with a slightly marbled texture.",
+      "essential": false,
+      "label": "bath bomb",
+      "last_event": "moved",
+      "last_seen": "51 seconds ago",
+      "object_id": "obj_6e5c4ea4e4",
+      "status": "present",
+      "zone": "side table"
+     },
+     {
+      "description": "A rectangular wooden cutting board with a lighter center and darker border.",
+      "essential": false,
+      "label": "cutting board",
+      "last_event": "removed",
+      "last_seen": "63 seconds ago",
+      "object_id": "obj_45fd04c6f2",
+      "status": "removed",
+      "zone": "shelf"
+     },
+     {
+      "description": "A brown leather bifold wallet with a slightly worn surface.",
+      "essential": true,
+      "label": "leather wallet",
+      "last_event": "moved",
+      "last_seen": "71 seconds ago",
+      "object_id": "obj_2d8547771b",
+      "status": "present",
+      "zone": "shelf"
+     },
+     {
+      "description": "A clear or translucent adhesive tape roll with a plastic core.",
+      "essential": false,
+      "label": "roll of tape",
+      "last_event": "removed",
+      "last_seen": "83 seconds ago",
+      "object_id": "obj_ef7a573f43",
+      "status": "removed",
+      "zone": "desk"
+     },
+     {
+      "description": "A bright red rectangular leather wallet or card holder.",
+      "essential": true,
+      "label": "red wallet",
+      "last_event": "removed",
+      "last_seen": "1 minutes ago",
+      "object_id": "obj_b6ae106bb8",
+      "status": "removed",
+      "zone": "desk"
+     }
+    ]
+   },
+   "n": 3,
+   "tool": "list_objects"
+  },
+  {
+   "ts": 1793014279.22789,
+   "kind": "thought",
+   "text": "Memory says your leather wallet is on the shelf. Let me verify with the live camera.",
+   "n": 4
+  },
+  {
+   "ts": 1793014279.233683,
+   "kind": "tool_call",
+   "input": {
+    "object_id": "obj_2d8547771b"
+   },
+   "tool": "verify_object_live",
+   "n": 5
+  },
+  {
+   "ts": 1793014281.049099,
+   "kind": "tool_result",
+   "output": {
+    "bbox": [
+     478,
+     128,
+     60,
+     42
+    ],
+    "match_empty_surface": 0.361,
+    "match_object": 0.911,
+    "object_id": "obj_2d8547771b",
+    "occluded": false,
+    "ok": true,
+    "present": true,
+    "similarity": 0.911,
+    "zone": "shelf"
+   },
+   "n": 6,
+   "tool": "verify_object_live"
+  },
+  {
+   "ts": 1793014284.241878,
+   "kind": "thought",
+   "text": "I can confirm it's there right now.",
+   "n": 7
+  },
+  {
+   "ts": 1793014284.247595,
+   "kind": "tool_call",
+   "input": {
+    "answer": "Your leather wallet is on the shelf — I can see it there right now. 😊",
+    "confidence": "high",
+    "object_id": "obj_2d8547771b"
+   },
+   "tool": "final_answer",
+   "n": 8
+  },
+  {
+   "ts": 1793014284.252956,
+   "kind": "tool_result",
+   "output": {
+    "ok": true
+   },
+   "n": 9,
+   "tool": "final_answer"
+  },
+  {
+   "ts": 1793014284.258476,
+   "kind": "answer",
+   "text": "Your leather wallet is on the shelf — I can see it there right now. 😊",
+   "n": 10
+  }
+ ]
+}

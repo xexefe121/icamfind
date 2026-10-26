@@ -1,0 +1,700 @@
+[
+ {
+  "truth_events": 13,
+  "predicted_events": 13,
+  "true_positives": 13,
+  "precision": 1.0,
+  "recall": 1.0,
+  "f1": 1.0,
+  "zone_accuracy": 1.0,
+  "exact_type_accuracy": 1.0,
+  "mean_latency_s": 1.46,
+  "identity_consistency": "4/4",
+  "by_type": {
+   "placed": {
+    "truth": 6,
+    "detected": 6,
+    "recall": 1.0
+   },
+   "removed": {
+    "truth": 5,
+    "detected": 5,
+    "recall": 1.0
+   },
+   "moved": {
+    "truth": 2,
+    "detected": 2,
+    "recall": 1.0
+   }
+  },
+  "missed": [],
+  "false_positives": [],
+  "video": "synthetic_1.mp4",
+  "performance": {
+   "frames": 2250,
+   "video_fps": 15.0,
+   "median_ms_per_frame": 22.62,
+   "p95_ms_per_frame": 37.21,
+   "rebaselines": 1
+  },
+  "predictions": [
+   {
+    "type": "placed",
+    "ts": 7.533333333333333,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_f37e1807af"
+   },
+   {
+    "type": "placed",
+    "ts": 14.466666666666667,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_78f507c798"
+   },
+   {
+    "type": "placed",
+    "ts": 21.533333333333335,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_96fd39ac16"
+   },
+   {
+    "type": "placed",
+    "ts": 28.266666666666666,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_caa4e441af"
+   },
+   {
+    "type": "removed",
+    "ts": 41.53333333333333,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_50b4613971"
+   },
+   {
+    "type": "removed",
+    "ts": 48.46666666666667,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_f37e1807af"
+   },
+   {
+    "type": "moved",
+    "ts": 53.46666666666667,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_f37e1807af",
+    "from_zone": "side table"
+   },
+   {
+    "type": "removed",
+    "ts": 60.46666666666667,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_78f507c798"
+   },
+   {
+    "type": "moved",
+    "ts": 65.46666666666667,
+    "zone": "shelf",
+    "label": "object",
+    "object_id": "obj_78f507c798",
+    "from_zone": "desk"
+   },
+   {
+    "type": "removed",
+    "ts": 72.53333333333333,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_96fd39ac16"
+   },
+   {
+    "type": "removed",
+    "ts": 79.33333333333333,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_caa4e441af"
+   },
+   {
+    "type": "placed",
+    "ts": 92.33333333333333,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_7e354de525"
+   },
+   {
+    "type": "placed",
+    "ts": 99.53333333333333,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_c5951f82d3"
+   }
+  ]
+ },
+ {
+  "truth_events": 13,
+  "predicted_events": 13,
+  "true_positives": 12,
+  "precision": 0.923,
+  "recall": 0.923,
+  "f1": 0.923,
+  "zone_accuracy": 1.0,
+  "exact_type_accuracy": 1.0,
+  "mean_latency_s": 1.51,
+  "identity_consistency": "4/4",
+  "by_type": {
+   "placed": {
+    "truth": 6,
+    "detected": 6,
+    "recall": 1.0
+   },
+   "removed": {
+    "truth": 5,
+    "detected": 4,
+    "recall": 0.8
+   },
+   "moved": {
+    "truth": 2,
+    "detected": 2,
+    "recall": 1.0
+   }
+  },
+  "missed": [
+   {
+    "t": 40.0,
+    "type": "removed",
+    "object": "remote",
+    "zone": "desk"
+   }
+  ],
+  "false_positives": [
+   {
+    "type": "placed",
+    "ts": 41.46666666666667,
+    "zone": "desk",
+    "label": "object"
+   }
+  ],
+  "video": "synthetic_2.mp4",
+  "performance": {
+   "frames": 2250,
+   "video_fps": 15.0,
+   "median_ms_per_frame": 38.31,
+   "p95_ms_per_frame": 100.81,
+   "rebaselines": 1
+  },
+  "predictions": [
+   {
+    "type": "placed",
+    "ts": 7.466666666666667,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_3f1229df99"
+   },
+   {
+    "type": "placed",
+    "ts": 14.533333333333333,
+    "zone": "shelf",
+    "label": "object",
+    "object_id": "obj_ee0b188c77"
+   },
+   {
+    "type": "placed",
+    "ts": 21.533333333333335,
+    "zone": "shelf",
+    "label": "object",
+    "object_id": "obj_f10e9a7579"
+   },
+   {
+    "type": "placed",
+    "ts": 28.466666666666665,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_896eb682f5"
+   },
+   {
+    "type": "placed",
+    "ts": 41.46666666666667,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_d1234555fd"
+   },
+   {
+    "type": "removed",
+    "ts": 48.46666666666667,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_3f1229df99"
+   },
+   {
+    "type": "removed",
+    "ts": 55.46666666666667,
+    "zone": "shelf",
+    "label": "object",
+    "object_id": "obj_ee0b188c77"
+   },
+   {
+    "type": "removed",
+    "ts": 62.53333333333333,
+    "zone": "shelf",
+    "label": "object",
+    "object_id": "obj_f10e9a7579"
+   },
+   {
+    "type": "moved",
+    "ts": 67.53333333333333,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_f10e9a7579",
+    "from_zone": "shelf"
+   },
+   {
+    "type": "removed",
+    "ts": 74.46666666666667,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_896eb682f5"
+   },
+   {
+    "type": "moved",
+    "ts": 79.46666666666667,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_896eb682f5",
+    "from_zone": "side table"
+   },
+   {
+    "type": "placed",
+    "ts": 92.53333333333333,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_b6202224e9"
+   },
+   {
+    "type": "placed",
+    "ts": 99.66666666666667,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_16a48acdd5"
+   }
+  ]
+ },
+ {
+  "truth_events": 13,
+  "predicted_events": 13,
+  "true_positives": 13,
+  "precision": 1.0,
+  "recall": 1.0,
+  "f1": 1.0,
+  "zone_accuracy": 1.0,
+  "exact_type_accuracy": 1.0,
+  "mean_latency_s": 1.47,
+  "identity_consistency": "4/4",
+  "by_type": {
+   "placed": {
+    "truth": 6,
+    "detected": 6,
+    "recall": 1.0
+   },
+   "removed": {
+    "truth": 5,
+    "detected": 5,
+    "recall": 1.0
+   },
+   "moved": {
+    "truth": 2,
+    "detected": 2,
+    "recall": 1.0
+   }
+  },
+  "missed": [],
+  "false_positives": [],
+  "video": "synthetic_3.mp4",
+  "performance": {
+   "frames": 2250,
+   "video_fps": 15.0,
+   "median_ms_per_frame": 28.24,
+   "p95_ms_per_frame": 57.56,
+   "rebaselines": 1
+  },
+  "predictions": [
+   {
+    "type": "placed",
+    "ts": 7.266666666666667,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_59813576a2"
+   },
+   {
+    "type": "placed",
+    "ts": 14.6,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_82169d266e"
+   },
+   {
+    "type": "placed",
+    "ts": 21.4,
+    "zone": "shelf",
+    "label": "object",
+    "object_id": "obj_e32c8fd683"
+   },
+   {
+    "type": "placed",
+    "ts": 28.466666666666665,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_0a4f3eb006"
+   },
+   {
+    "type": "removed",
+    "ts": 41.53333333333333,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_0d21eb90eb"
+   },
+   {
+    "type": "removed",
+    "ts": 48.266666666666666,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_59813576a2"
+   },
+   {
+    "type": "removed",
+    "ts": 55.6,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_82169d266e"
+   },
+   {
+    "type": "moved",
+    "ts": 60.46666666666667,
+    "zone": "shelf",
+    "label": "object",
+    "object_id": "obj_82169d266e",
+    "from_zone": "side table"
+   },
+   {
+    "type": "removed",
+    "ts": 67.33333333333333,
+    "zone": "shelf",
+    "label": "object",
+    "object_id": "obj_e32c8fd683"
+   },
+   {
+    "type": "removed",
+    "ts": 74.46666666666667,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_0a4f3eb006"
+   },
+   {
+    "type": "moved",
+    "ts": 79.53333333333333,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_0a4f3eb006",
+    "from_zone": "desk"
+   },
+   {
+    "type": "placed",
+    "ts": 92.53333333333333,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_1d44a8365a"
+   },
+   {
+    "type": "placed",
+    "ts": 99.6,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_70a30051da"
+   }
+  ]
+ },
+ {
+  "truth_events": 12,
+  "predicted_events": 12,
+  "true_positives": 12,
+  "precision": 1.0,
+  "recall": 1.0,
+  "f1": 1.0,
+  "zone_accuracy": 1.0,
+  "exact_type_accuracy": 1.0,
+  "mean_latency_s": 1.44,
+  "identity_consistency": "4/4",
+  "by_type": {
+   "placed": {
+    "truth": 6,
+    "detected": 6,
+    "recall": 1.0
+   },
+   "removed": {
+    "truth": 5,
+    "detected": 5,
+    "recall": 1.0
+   },
+   "moved": {
+    "truth": 1,
+    "detected": 1,
+    "recall": 1.0
+   }
+  },
+  "missed": [],
+  "false_positives": [],
+  "video": "synthetic_4.mp4",
+  "performance": {
+   "frames": 2250,
+   "video_fps": 15.0,
+   "median_ms_per_frame": 29.81,
+   "p95_ms_per_frame": 52.32,
+   "rebaselines": 1
+  },
+  "predictions": [
+   {
+    "type": "placed",
+    "ts": 7.466666666666667,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_b058549661"
+   },
+   {
+    "type": "placed",
+    "ts": 14.466666666666667,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_aca591f128"
+   },
+   {
+    "type": "placed",
+    "ts": 21.466666666666665,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_29a42a80c6"
+   },
+   {
+    "type": "placed",
+    "ts": 28.266666666666666,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_c8ad0aa98e"
+   },
+   {
+    "type": "removed",
+    "ts": 41.53333333333333,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_0fd8746219"
+   },
+   {
+    "type": "removed",
+    "ts": 48.4,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_b058549661"
+   },
+   {
+    "type": "removed",
+    "ts": 55.46666666666667,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_aca591f128"
+   },
+   {
+    "type": "moved",
+    "ts": 60.46666666666667,
+    "zone": "shelf",
+    "label": "object",
+    "object_id": "obj_aca591f128",
+    "from_zone": "side table"
+   },
+   {
+    "type": "removed",
+    "ts": 67.4,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_29a42a80c6"
+   },
+   {
+    "type": "removed",
+    "ts": 74.26666666666667,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_c8ad0aa98e"
+   },
+   {
+    "type": "placed",
+    "ts": 87.53333333333333,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_96c548c70d"
+   },
+   {
+    "type": "placed",
+    "ts": 94.6,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_9c876e1a24"
+   }
+  ]
+ },
+ {
+  "truth_events": 14,
+  "predicted_events": 15,
+  "true_positives": 14,
+  "precision": 0.933,
+  "recall": 1.0,
+  "f1": 0.966,
+  "zone_accuracy": 1.0,
+  "exact_type_accuracy": 1.0,
+  "mean_latency_s": 1.46,
+  "identity_consistency": "4/4",
+  "by_type": {
+   "placed": {
+    "truth": 6,
+    "detected": 6,
+    "recall": 1.0
+   },
+   "removed": {
+    "truth": 5,
+    "detected": 5,
+    "recall": 1.0
+   },
+   "moved": {
+    "truth": 3,
+    "detected": 3,
+    "recall": 1.0
+   }
+  },
+  "missed": [],
+  "false_positives": [
+   {
+    "type": "removed",
+    "ts": 77.53333333333333,
+    "zone": "side table",
+    "label": "object"
+   }
+  ],
+  "video": "synthetic_5.mp4",
+  "performance": {
+   "frames": 2250,
+   "video_fps": 15.0,
+   "median_ms_per_frame": 33.72,
+   "p95_ms_per_frame": 51.31,
+   "rebaselines": 1
+  },
+  "predictions": [
+   {
+    "type": "placed",
+    "ts": 7.533333333333333,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_38fb365192"
+   },
+   {
+    "type": "placed",
+    "ts": 14.266666666666667,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_49ee044479"
+   },
+   {
+    "type": "placed",
+    "ts": 21.466666666666665,
+    "zone": "shelf",
+    "label": "object",
+    "object_id": "obj_12b25da98b"
+   },
+   {
+    "type": "placed",
+    "ts": 28.533333333333335,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_cfdc3992b2"
+   },
+   {
+    "type": "removed",
+    "ts": 41.53333333333333,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_1d9b9b8f29"
+   },
+   {
+    "type": "removed",
+    "ts": 48.46666666666667,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_38fb365192"
+   },
+   {
+    "type": "moved",
+    "ts": 53.46666666666667,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_38fb365192",
+    "from_zone": "side table"
+   },
+   {
+    "type": "removed",
+    "ts": 60.4,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_49ee044479"
+   },
+   {
+    "type": "moved",
+    "ts": 65.26666666666667,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_49ee044479",
+    "from_zone": "desk"
+   },
+   {
+    "type": "removed",
+    "ts": 72.46666666666667,
+    "zone": "shelf",
+    "label": "object",
+    "object_id": "obj_12b25da98b"
+   },
+   {
+    "type": "removed",
+    "ts": 77.53333333333333,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_49ee044479"
+   },
+   {
+    "type": "moved",
+    "ts": 77.53333333333333,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_12b25da98b",
+    "from_zone": "shelf"
+   },
+   {
+    "type": "removed",
+    "ts": 84.53333333333333,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_cfdc3992b2"
+   },
+   {
+    "type": "placed",
+    "ts": 97.33333333333333,
+    "zone": "side table",
+    "label": "object",
+    "object_id": "obj_5afcd5d253"
+   },
+   {
+    "type": "placed",
+    "ts": 104.6,
+    "zone": "desk",
+    "label": "object",
+    "object_id": "obj_f35195647a"
+   }
+  ]
+ }
+]

@@ -1,0 +1,2 @@
+# The Lambda functions use only the Python standard library and boto3, which the
+# python3.12 Lambda runtime provides. Nothing is bundled; this file is kept for clarity.

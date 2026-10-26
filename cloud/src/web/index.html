@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>iCamFind</title>
+  <meta name="description" content="iCamFind remembers where everyday things were put down, so people with memory loss and their caregivers can find them again.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <!-- Login: shown until an access code is stored -->
+  <section id="login" class="login" aria-labelledby="login-title" hidden>
+    <div class="login-card">
+      <div class="brand brand-lg"><span class="brand-mark" aria-hidden="true">◉</span> iCamFind</div>
+      <h1 id="login-title">Welcome back</h1>
+      <p class="muted">iCamFind remembers where things were put down. Enter the access code from your setup to continue.</p>
+      <form id="login-form" autocomplete="off">
+        <label for="token-input">Access code</label>
+        <input id="token-input" name="token" type="password" required spellcheck="false" autocapitalize="off">
+        <p id="login-error" class="error-text" role="alert" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block">Continue</button>
+      </form>
+    </div>
+  </section>
+
+  <div id="app" hidden>
+    <header class="site-header">
+      <div class="header-inner">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">◉</span> iCamFind</div>
+        <div class="header-status">
+          <span id="device-pill" class="pill pill-muted" role="status">Connecting…</span>
+          <a id="alerts-badge" class="pill pill-alert" href="#alerts" hidden>
+            <span aria-hidden="true">!</span> <span id="alerts-badge-text">0 alerts</span>
+          </a>
+        </div>
+        <div class="header-actions">
+          <button id="large-text-toggle" class="btn btn-ghost" type="button" aria-pressed="false">Larger text</button>
+          <button id="logout-btn" class="btn btn-ghost" type="button">Sign out</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" tabindex="-1">
+      <!-- Hero: ask a question -->
+      <section id="ask" class="hero" aria-labelledby="ask-title">
+        <h1 id="ask-title" class="hero-title">What are you looking for?</h1>
+        <form id="ask-form" class="ask-form" role="search">
+          <label for="ask-input" class="visually-hidden">Ask iCamFind a question</label>
+          <input id="ask-input" name="question" type="text" autocomplete="off"
+                 placeholder="Where are my keys?" maxlength="300" required>
+          <button id="mic-btn" class="btn btn-icon" type="button" aria-pressed="false" hidden>
+            <span aria-hidden="true">🎤</span><span class="visually-hidden" id="mic-label">Speak your question</span>
+          </button>
+          <button id="ask-btn" class="btn btn-primary btn-lg" type="submit">Ask</button>
+        </form>
+        <div class="chips" role="group" aria-label="Suggested questions">
+          <button class="chip" type="button" data-q="Where are my keys?">Where are my keys?</button>
+          <button class="chip" type="button" data-q="Did I take my pills today?">Did I take my pills today?</button>
+          <button class="chip" type="button" data-q="What did I put on the desk today?">What did I put on the desk today?</button>
+        </div>
+
+        <div id="job-area" class="job-area" hidden>
+          <div id="job-status" class="job-status" role="status"></div>
+          <div id="answer-card" class="answer-card" aria-live="polite" hidden></div>
+          <div class="answer-tools" id="answer-tools" hidden>
+            <button id="read-aloud-btn" class="btn" type="button">Read aloud</button>
+            <label class="switch">
+              <input id="auto-read" type="checkbox">
+              <span>Read answers aloud automatically</span>
+            </label>
+          </div>
+          <details id="trace" class="trace" open>
+            <summary>How I found this</summary>
+            <ol id="trace-list" class="trace-list"></ol>
+          </details>
+        </div>
+      </section>
+
+      <div class="layout">
+        <!-- Room view -->
+        <section id="room" class="card span-2" aria-labelledby="room-title">
+          <div class="card-head">
+            <h2 id="room-title">Room view</h2>
+            <button id="snapshot-btn" class="btn" type="button">Refresh camera view</button>
+          </div>
+          <div id="room-view" class="room-view">
+            <p class="placeholder">No camera view yet. Press “Refresh camera view” once the camera is online.</p>
+          </div>
+          <p class="muted small">People are blurred on the device before any picture leaves the house.</p>
+        </section>
+
+        <!-- Alerts -->
+        <section id="alerts" class="card" aria-labelledby="alerts-title" tabindex="-1">
+          <h2 id="alerts-title">Alerts</h2>
+          <ul id="alerts-list" class="plain-list"></ul>
+        </section>
+
+        <!-- Objects -->
+        <section id="objects" class="card span-3" aria-labelledby="objects-title">
+          <div class="card-head">
+            <h2 id="objects-title">Things I remember</h2>
+            <div class="segmented" role="group" aria-label="Filter things">
+              <button type="button" class="seg" data-filter="all" aria-pressed="true">All</button>
+              <button type="button" class="seg" data-filter="present" aria-pressed="false">On surfaces</button>
+              <button type="button" class="seg" data-filter="removed" aria-pressed="false">Taken</button>
+            </div>
+          </div>
+          <div id="objects-grid" class="objects-grid"></div>
+        </section>
+
+        <!-- Timeline -->
+        <section id="timeline" class="card span-2" aria-labelledby="timeline-title">
+          <h2 id="timeline-title">Recent activity</h2>
+          <ol id="events-list" class="timeline"></ol>
+        </section>
+
+        <!-- Caregiver -->
+        <section id="caregiver" class="card" aria-labelledby="caregiver-title">
+          <h2 id="caregiver-title">Caregiver</h2>
+
+          <h3>Waiting for approval</h3>
+          <ul id="approvals-list" class="plain-list"></ul>
+
+          <h3>Daily routines</h3>
+          <ul id="routines-list" class="plain-list"></ul>
+
+          <details class="routine-new">
+            <summary>Add a routine</summary>
+            <form id="routine-form" class="stack">
+              <label for="routine-name">Name</label>
+              <input id="routine-name" type="text" required maxlength="60" placeholder="Morning pills">
+              <label for="routine-object">Object to watch</label>
+              <select id="routine-object" required></select>
+              <div class="row">
+                <div>
+                  <label for="routine-start">From</label>
+                  <input id="routine-start" type="time" required value="08:00">
+                </div>
+                <div>
+                  <label for="routine-end">Until</label>
+                  <input id="routine-end" type="time" required value="09:00">
+                </div>
+              </div>
+              <label for="routine-tz">Time zone</label>
+              <input id="routine-tz" type="text" required>
+              <button class="btn btn-primary" type="submit">Save routine</button>
+            </form>
+          </details>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <p class="muted small">iCamFind runs vision on the local device with OpenCV 5 and keeps its memory on AWS.</p>
+    </footer>
+  </div>
+
+  <!-- Object detail dialog -->
+  <dialog id="object-dialog" aria-labelledby="dialog-title">
+    <div class="dialog-head">
+      <h2 id="dialog-title">Object</h2>
+      <button id="dialog-close" class="btn btn-ghost" type="button" aria-label="Close">✕</button>
+    </div>
+    <div id="dialog-body" class="dialog-body"></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

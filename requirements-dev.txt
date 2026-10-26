@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest==9.1.1
+boto3==1.43.118
+tzdata==2026.1

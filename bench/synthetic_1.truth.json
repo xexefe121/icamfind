@@ -1,0 +1,178 @@
+{
+ "video": "synthetic_1.mp4",
+ "fps": 15,
+ "frame_size": [
+  640,
+  480
+ ],
+ "seed": 1,
+ "zones": [
+  {
+   "name": "desk",
+   "polygon": [
+    [
+     20,
+     250
+    ],
+    [
+     400,
+     250
+    ],
+    [
+     400,
+     470
+    ],
+    [
+     20,
+     470
+    ]
+   ]
+  },
+  {
+   "name": "shelf",
+   "polygon": [
+    [
+     430,
+     60
+    ],
+    [
+     630,
+     60
+    ],
+    [
+     630,
+     200
+    ],
+    [
+     430,
+     200
+    ]
+   ]
+  },
+  {
+   "name": "side table",
+   "polygon": [
+    [
+     430,
+     280
+    ],
+    [
+     630,
+     280
+    ],
+    [
+     630,
+     470
+    ],
+    [
+     430,
+     470
+    ]
+   ]
+  },
+  {
+   "name": "door",
+   "polygon": [
+    [
+     0,
+     0
+    ],
+    [
+     150,
+     0
+    ],
+    [
+     150,
+     230
+    ],
+    [
+     0,
+     230
+    ]
+   ]
+  }
+ ],
+ "door_zone": "door",
+ "events": [
+  {
+   "t": 6.0,
+   "type": "placed",
+   "object": "pill bottle",
+   "zone": "side table"
+  },
+  {
+   "t": 13.0,
+   "type": "placed",
+   "object": "mug",
+   "zone": "desk"
+  },
+  {
+   "t": 20.0,
+   "type": "placed",
+   "object": "wallet",
+   "zone": "side table"
+  },
+  {
+   "t": 27.0,
+   "type": "placed",
+   "object": "keys",
+   "zone": "desk"
+  },
+  {
+   "t": 40.0,
+   "type": "removed",
+   "object": "remote",
+   "zone": "desk"
+  },
+  {
+   "t": 47.0,
+   "type": "removed",
+   "object": "pill bottle",
+   "zone": "side table"
+  },
+  {
+   "t": 52.0,
+   "type": "moved",
+   "object": "pill bottle",
+   "zone": "desk",
+   "from_zone": "side table"
+  },
+  {
+   "t": 59.0,
+   "type": "removed",
+   "object": "mug",
+   "zone": "desk"
+  },
+  {
+   "t": 64.0,
+   "type": "moved",
+   "object": "mug",
+   "zone": "shelf",
+   "from_zone": "desk"
+  },
+  {
+   "t": 71.0,
+   "type": "removed",
+   "object": "wallet",
+   "zone": "side table"
+  },
+  {
+   "t": 78.0,
+   "type": "removed",
+   "object": "keys",
+   "zone": "desk"
+  },
+  {
+   "t": 91.0,
+   "type": "placed",
+   "object": "glasses",
+   "zone": "desk"
+  },
+  {
+   "t": 98.0,
+   "type": "placed",
+   "object": "book",
+   "zone": "side table"
+  }
+ ]
+}

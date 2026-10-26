@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .p{fill:#ecfeff;stroke:#0e7490;stroke-width:2}
+      .d{fill:#eef2ff;stroke:#4338ca;stroke-width:2}
+      .x{fill:#fff7ed;stroke:#c2410c;stroke-width:2}
+      .h{fill:#f0fdf4;stroke:#15803d;stroke-width:2}
+      .t{font-weight:600;fill:#0f172a}
+      .s{fill:#334155;font-size:12.5px}
+      .l{stroke:#334155;stroke-width:1.6;fill:none;marker-end:url(#a)}
+      .lab{fill:#475569;font-size:12px}
+    </style>
+  </defs>
+  <rect width="1200" height="520" fill="#f8fafc"/>
+  <text x="24" y="34" font-weight="700" font-size="17" fill="#0f172a">Agentic vision loop: OpenCV evidence decides the next action</text>
+  <text x="24" y="58" class="s">Legend: cyan = perception (OpenCV 5 on device), indigo = decision (Claude on Bedrock), orange = action, green = human control</text>
+
+  <rect x="24" y="90" width="200" height="70" rx="10" class="d"/>
+  <text x="38" y="116" class="t">Question or routine</text>
+  <text x="38" y="138" class="s">"Where are my keys?"</text>
+
+  <rect x="264" y="90" width="200" height="70" rx="10" class="d"/>
+  <text x="278" y="116" class="t">list_objects / history</text>
+  <text x="278" y="138" class="s">memory: desk, 20 min ago</text>
+
+  <rect x="504" y="90" width="220" height="70" rx="10" class="p"/>
+  <text x="518" y="116" class="t">verify_object_live</text>
+  <text x="518" y="138" class="s">patch match at remembered box</text>
+
+  <rect x="784" y="60" width="200" height="60" rx="10" class="x"/>
+  <text x="798" y="86" class="t">present: answer</text>
+  <text x="798" y="106" class="s">with fresh crop</text>
+
+  <rect x="504" y="220" width="220" height="70" rx="10" class="p"/>
+  <text x="518" y="246" class="t">scan_room_for_object</text>
+  <text x="518" y="268" class="s">ORB + RANSAC / template search</text>
+
+  <rect x="784" y="180" width="200" height="60" rx="10" class="x"/>
+  <text x="798" y="206" class="t">found: update_memory</text>
+  <text x="798" y="226" class="s">new zone, then answer</text>
+
+  <rect x="784" y="270" width="200" height="60" rx="10" class="x"/>
+  <text x="798" y="296" class="t">not found: answer</text>
+  <text x="798" y="316" class="s">"picked up at 14:02"</text>
+
+  <rect x="24" y="380" width="230" height="80" rx="10" class="d"/>
+  <text x="38" y="406" class="t">Routine window ended</text>
+  <text x="38" y="428" class="s">EventBridge sweep: no pick-up</text>
+  <text x="38" y="446" class="s">detected in the window</text>
+
+  <rect x="294" y="380" width="200" height="80" rx="10" class="p"/>
+  <text x="308" y="406" class="t">verify / scan</text>
+  <text x="308" y="428" class="s">is it still untouched?</text>
+
+  <rect x="534" y="380" width="200" height="80" rx="10" class="x"/>
+  <text x="548" y="406" class="t">speak_on_device</text>
+  <text x="548" y="428" class="s">gentle reminder,</text>
+  <text x="548" y="446" class="s">status = reminded</text>
+
+  <rect x="774" y="380" width="200" height="80" rx="10" class="h"/>
+  <text x="788" y="406" class="t">Caregiver request</text>
+  <text x="788" y="428" class="s">approval card in app, or</text>
+  <text x="788" y="446" class="s">auto-send after grace period</text>
+
+  <rect x="1004" y="380" width="170" height="80" rx="10" class="x"/>
+  <text x="1018" y="406" class="t">SNS email</text>
+  <text x="1018" y="428" class="s">only after policy</text>
+  <text x="1018" y="446" class="s">check in code</text>
+
+  <path class="l" d="M224,125 L264,125"/>
+  <path class="l" d="M464,125 L504,125"/>
+  <path class="l" d="M724,115 L784,92"/>
+  <text x="730" y="96" class="lab">present</text>
+  <path class="l" d="M614,160 L614,220"/>
+  <text x="622" y="196" class="lab">missing / empty surface</text>
+  <path class="l" d="M724,245 L784,212"/>
+  <path class="l" d="M724,265 L784,298"/>
+  <path class="l" d="M254,420 L294,420"/>
+  <path class="l" d="M494,420 L534,420"/>
+  <text x="498" y="404" class="lab">untouched</text>
+  <path class="l" d="M734,420 L774,420"/>
+  <text x="738" y="404" class="lab">2nd check</text>
+  <path class="l" d="M974,420 L1004,420"/>
+</svg>

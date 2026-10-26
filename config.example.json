@@ -1,0 +1,28 @@
+{
+  "source": "auto",
+  "device_id": "home-cam-1",
+  "process_width": 640,
+  "target_fps": 12.0,
+  "zones": [
+    {"name": "desk", "polygon": [[0, 240], [400, 240], [400, 480], [0, 480]]},
+    {"name": "side table", "polygon": [[400, 240], [640, 240], [640, 480], [400, 480]]},
+    {"name": "shelf", "polygon": [[300, 0], [640, 0], [640, 240], [300, 240]]},
+    {"name": "door", "polygon": [[0, 0], [300, 0], [300, 240], [0, 240]]}
+  ],
+  "door_zone": "door",
+  "map_image_points": null,
+  "map_world_points": null,
+  "essentials": ["keys", "wallet", "cell phone", "phone", "glasses", "pill", "medication"],
+  "stable_seconds": 2.0,
+  "min_object_area": 0.0012,
+  "max_object_area": 0.25,
+  "long_diff_threshold": 28,
+  "person_conf": 0.45,
+  "person_interval": 0.4,
+  "lighting_change_fraction": 0.35,
+  "blur_people": true,
+  "api_url": null,
+  "data_dir": "data",
+  "model_path": "models/object_detection_yolox_2022nov.onnx",
+  "speak": true
+}

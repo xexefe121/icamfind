@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .box{fill:#ffffff;stroke:#334155;stroke-width:1.5;rx:10}
+      .edge{fill:#ecfeff;stroke:#0e7490;stroke-width:2}
+      .aws{fill:#fff7ed;stroke:#c2410c;stroke-width:2}
+      .t{font-weight:600;fill:#0f172a}
+      .s{fill:#334155;font-size:12.5px}
+      .h{font-weight:700;font-size:17px}
+      .l{stroke:#334155;stroke-width:1.6;fill:none;marker-end:url(#a)}
+      .lab{fill:#475569;font-size:12px}
+    </style>
+  </defs>
+  <rect x="0" y="0" width="1200" height="760" fill="#f8fafc"/>
+  <text x="24" y="34" class="h" fill="#0f172a">iCamFind architecture: local-first OpenCV 5 perception + AWS memory and agent</text>
+
+  <!-- Edge -->
+  <rect x="20" y="56" width="430" height="680" class="edge" rx="14"/>
+  <text x="40" y="84" class="h" fill="#0e7490">Home device (laptop / mini-PC + webcam or RTSP CCTV)</text>
+
+  <rect x="44" y="104" width="382" height="56" class="box"/>
+  <text x="60" y="127" class="t">Capture</text>
+  <text x="60" y="147" class="s">cv.VideoCapture: webcam / RTSP / recorded clip, 640 px, ~12 fps</text>
+
+  <rect x="44" y="178" width="382" height="94" class="box"/>
+  <text x="60" y="201" class="t">Scene memory (OpenCV 5 core)</text>
+  <text x="60" y="221" class="s">Short-term MOG2 (motion) + long-term reference background</text>
+  <text x="60" y="239" class="s">Static-evidence accumulator, morphology, connected components</text>
+  <text x="60" y="257" class="s">Lighting guard (global-change re-baseline)</text>
+
+  <rect x="44" y="290" width="382" height="76" class="box"/>
+  <text x="60" y="313" class="t">Event explanation</text>
+  <text x="60" y="333" class="s">placed / removed via patch match + Sobel boundary "ghost" test</text>
+  <text x="60" y="351" class="s">moved via re-ID: ORB + ratio test, HSV histogram, shape</text>
+
+  <rect x="44" y="384" width="382" height="76" class="box"/>
+  <text x="60" y="407" class="t">cv.dnn YOLOX-S (OpenCV Model Zoo)</text>
+  <text x="60" y="427" class="s">people mask (never treated as objects, blurred in all uploads)</text>
+  <text x="60" y="445" class="s">COCO label hint for each new object crop</text>
+
+  <rect x="44" y="478" width="382" height="76" class="box"/>
+  <text x="60" y="501" class="t">Live perception tools (on agent request)</text>
+  <text x="60" y="521" class="s">verify: NCC/patch match at remembered box</text>
+  <text x="60" y="539" class="s">scan: ORB + RANSAC homography, multi-scale template match</text>
+
+  <rect x="44" y="572" width="382" height="62" class="box"/>
+  <text x="60" y="595" class="t">Zones + room map</text>
+  <text x="60" y="615" class="s">pointPolygonTest zones, getPerspectiveTransform floor map</text>
+
+  <rect x="44" y="652" width="382" height="66" class="box"/>
+  <text x="60" y="675" class="t">Local journal + uplink + speech</text>
+  <text x="60" y="695" class="s">journal.jsonl + crops survive offline; retry queue; door alert TTS</text>
+
+  <!-- AWS -->
+  <rect x="490" y="56" width="690" height="680" class="aws" rx="14"/>
+  <text x="510" y="84" class="h" fill="#c2410c">AWS (ap-southeast-2, Sydney) - one SAM / CloudFormation stack</text>
+
+  <rect x="514" y="104" width="300" height="76" class="box"/>
+  <text x="530" y="127" class="t">API Gateway HTTP API</text>
+  <text x="530" y="147" class="s">token auth, throttling, serves web app</text>
+  <text x="530" y="165" class="s">routes: events, heartbeat, commands, ask</text>
+
+  <rect x="514" y="200" width="300" height="76" class="box"/>
+  <text x="530" y="223" class="t">Lambda "api" (Python 3.12, Graviton arm64)</text>
+  <text x="530" y="243" class="s">ingest events + crops, command queue,</text>
+  <text x="530" y="261" class="s">state for UI, approvals, routines</text>
+
+  <rect x="514" y="296" width="300" height="94" class="box"/>
+  <text x="530" y="319" class="t">Lambda "agent"</text>
+  <text x="530" y="339" class="s">perception-decision-action loop</text>
+  <text x="530" y="357" class="s">tools: memory, verify_live, scan_room,</text>
+  <text x="530" y="375" class="s">update_memory, speak, caregiver (policy-gated)</text>
+
+  <rect x="514" y="410" width="300" height="60" class="box"/>
+  <text x="530" y="433" class="t">EventBridge rate(5 min) + Lambda</text>
+  <text x="530" y="453" class="s">routine checker (e.g. medication window)</text>
+
+  <rect x="856" y="104" width="300" height="94" class="box"/>
+  <text x="872" y="127" class="t">Amazon Bedrock - Claude Haiku 4.5</text>
+  <text x="872" y="147" class="s">au. inference profile (data stays in AU)</text>
+  <text x="872" y="165" class="s">open-vocabulary naming of crops</text>
+  <text x="872" y="183" class="s">agent reasoning; fallback Sonnet 4.6</text>
+
+  <rect x="856" y="218" width="300" height="76" class="box"/>
+  <text x="872" y="241" class="t">DynamoDB (single table + GSI)</text>
+  <text x="872" y="261" class="s">objects, event history, jobs + traces,</text>
+  <text x="872" y="279" class="s">commands, routines, approvals (PITR, SSE)</text>
+
+  <rect x="856" y="314" width="300" height="76" class="box"/>
+  <text x="872" y="337" class="t">S3 (private, SSE, TLS-only)</text>
+  <text x="872" y="357" class="s">crops tier to Glacier IR after 30 days:</text>
+  <text x="872" y="375" class="s">unbounded, low-cost long-term memory</text>
+
+  <rect x="856" y="410" width="300" height="60" class="box"/>
+  <text x="872" y="433" class="t">SNS (KMS-encrypted)</text>
+  <text x="872" y="453" class="s">caregiver email after approval / escalation</text>
+
+  <rect x="514" y="500" width="642" height="70" class="box"/>
+  <text x="530" y="523" class="t">Observability and operations</text>
+  <text x="530" y="543" class="s">CloudWatch JSON logs (30-day retention), X-Ray tracing, agent-error alarm,</text>
+  <text x="530" y="561" class="s">every agent step persisted and shown in the app ("How I found this")</text>
+
+  <rect x="514" y="590" width="642" height="128" class="box"/>
+  <text x="530" y="613" class="t">Web app (served by the API, no build step)</text>
+  <text x="530" y="633" class="s">Ask by voice or text, live agent trace with camera crops, room view with zones,</text>
+  <text x="530" y="651" class="s">objects + history timeline, routines, caregiver approvals, alerts.</text>
+  <text x="530" y="669" class="s">Large-text mode, high contrast, keyboard operable, read-aloud answers.</text>
+  <text x="530" y="697" class="s" font-style="italic">Users: person with memory loss (asks), caregiver (routines + approvals)</text>
+
+  <!-- arrows -->
+  <path class="l" d="M426,690 C470,690 470,142 514,142"/>
+  <text x="440" y="400" class="lab" transform="rotate(-90 452 400)">HTTPS: events + crops, heartbeats, command poll</text>
+  <path class="l" d="M664,180 L664,200"/>
+  <path class="l" d="M664,276 L664,296"/>
+  <path class="l" d="M814,238 L856,256"/>
+  <path class="l" d="M814,250 L856,352"/>
+  <path class="l" d="M814,320 L856,160"/>
+  <path class="l" d="M814,340 L856,262"/>
+  <path class="l" d="M814,370 L856,440"/>
+  <path class="l" d="M664,410 L664,390"/>
+  <path class="l" d="M814,226 L856,150"/>
+  <path class="l" d="M514,520 C470,520 470,516 426,516"/>
+  <text x="434" y="508" class="lab">verify / scan</text>
+</svg>
