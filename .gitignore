@@ -11,3 +11,4 @@ config.json
 .pytest_cache/
 data_e2e/
 data_replay/
+data_*/
