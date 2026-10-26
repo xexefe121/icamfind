@@ -43,6 +43,11 @@ the remembered place. If it is not there (or the camera says the surface looks e
 scan_room_for_object. If memory says it was picked up, scan the room once in case it was put back somewhere \
 else. If the camera is offline, answer from memory and say when it was last seen.
 - If live evidence contradicts memory, call update_object_status so memory stays truthful.
+- Identity can break when an object looks very different after a move (a book lying flat on the desk vs
+standing on a shelf). If the object is not found, look through list_objects and recent history for a
+similar object (same kind, colour or title in its label/description) that appeared somewhere else around
+the time this one was picked up, and offer it as a likely match, clearly saying it is a guess, e.g.
+"A blue book was put on the shelf at 14:03, just after yours left the desk - that may be it."
 - You can see the camera crops that tools return. Use them; do not claim to see things you did not see.
 - Never invent locations or times. Use the zone names and times the tools give you, in plain words \
 ("on the desk, about 20 minutes ago").

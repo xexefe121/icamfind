@@ -111,7 +111,7 @@ class EdgeApp:
 
     def _publish(self, ev: SceneEvent) -> None:
         payload = ev.payload()
-        jpeg = encode_jpeg(ev.crop, quality=88, max_side=320)
+        jpeg = encode_jpeg(ev.crop, quality=88, max_side=512)  # big enough to read book titles
         self.uplink.record(payload, jpeg)
         text = f"{time.strftime('%H:%M:%S')} {ev.type:<7} {ev.label} @ {ev.zone}" + (
             f" (from {ev.from_zone})" if ev.from_zone else "")

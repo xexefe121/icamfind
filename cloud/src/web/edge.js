@@ -24,12 +24,13 @@
   const OPENCV_URL = "https://cdn.jsdelivr.net/npm/@techstark/opencv-js@5.0.0-release.1/dist/opencv.js";
   const OPENCV_SRI = "sha384-16eddoZUbhJFP+dmyqNO/+vH8UdDOg8MJo+zi1NSy2clHxpKiQaoSQWtQnPHzYvc";
 
-  // Mirrors icamfind/edge/config.py; max_object_area is lower in the browser because a laptop camera
-  // usually also sees the person sitting in front of it.
+  // Mirrors icamfind/edge/config.py. The browser Engine lowers max_object_area to 0.12 when it watches
+  // the whole frame (a laptop camera usually also sees the person in front of it); when it watches only
+  // the places the user drew, large items such as books or folders up to 25% of the frame are allowed.
   const DEFAULTS = {
     stableSeconds: 2.0,
     minObjectArea: 0.0012, // fraction of frame area
-    maxObjectArea: 0.12,
+    maxObjectArea: 0.25,
     longDiffThreshold: 28,
     lightingChangeFraction: 0.35,
     placesOnly: false, // core default = Python behaviour; the browser Engine turns it on
@@ -1239,7 +1240,8 @@
       const cv = this.cv;
       if (!this.core) {
         const geometry = new RoomGeometry(cv, this.opts.zones, this.opts.doorZone);
-        this.core = new SceneMemory(cv, { essentials: this.opts.essentials, placesOnly: this.opts.placesOnly }, geometry);
+        this.core = new SceneMemory(cv, { essentials: this.opts.essentials, placesOnly: this.opts.placesOnly,
+          maxObjectArea: this.opts.placesOnly ? 0.25 : 0.12 }, geometry);
         await this._restore();
       }
       this._capture = document.createElement("canvas");
@@ -1338,7 +1340,7 @@
 
     _publish(ev) {
       const cv = this.cv;
-      const crop = matToDataUrl(cv, ev.crop, "image/jpeg", 0.88, 320);
+      const crop = matToDataUrl(cv, ev.crop, "image/jpeg", 0.88, 512);
       del(ev.crop);
       const payload = {};
       for (const k of ["id", "type", "object_id", "ts", "zone", "bbox", "map_xy", "label", "local_label", "confidence",

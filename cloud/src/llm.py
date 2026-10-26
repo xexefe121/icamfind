@@ -91,10 +91,12 @@ def describe_crop(jpeg: bytes, local_label: str) -> dict:
                 {"type": "text", "text": (
                     "This crop shows one object a person just put down or picked up at home (the object is centred; "
                     f"an on-device detector guessed '{local_label}'). Name it the way the person would when asking "
-                    "where it is. Reply with only a JSON object: {\"label\": 2-3 word everyday name in lowercase "
-                    "(e.g. \"house keys\"), \"description\": one short sentence with colour/material/distinguishing "
-                    "detail, \"essential\": true if it is keys, wallet, phone, glasses, medication, hearing aid or "
-                    "ID card, else false}.")},
+                    "where it is. If it is a book, magazine, medicine box, bottle or document and you can read a "
+                    "title or product name, use it (e.g. \"The Hobbit (book)\", \"Panadol box\"); otherwise give a "
+                    "2-3 word everyday name in lowercase (e.g. \"house keys\", \"blue hardcover book\"). Reply with "
+                    "only a JSON object: {\"label\": the name, \"description\": one short sentence with colour, "
+                    "size, material and any readable text, \"essential\": true if it is keys, wallet, phone, glasses, "
+                    "medication, hearing aid or ID card, else false}.")},
             ],
         }],
     )
