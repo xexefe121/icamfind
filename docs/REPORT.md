@@ -242,6 +242,18 @@ Full per-clip table and failure list: [EVALUATION.md](EVALUATION.md).
   absorbed by the large-region rule (any region over 25% of the frame is treated as scene change).
   The guard is meant for partial lighting changes, which this benchmark does not test.
 
+**Browser engine parity:** `edge.js` (OpenCV.js 5.0.0, WebAssembly), replayed in Node on the same
+5 clips with `placesOnly` off, gives **identical** results to the Python pipeline:
+- F1 1.0 / 0.923 / 1.0 / 1.0 / 0.966 per clip;
+- the same failure events;
+- identity kept 20/20;
+- 27-33 ms per frame median.
+
+In a real browser (headless Edge with the benchmark room as a fake webcam, against the deployed
+cloud):
+- OpenCV.js loaded in 3.2 s and ran at about 7.5 fps;
+- place, remove and move events were uploaded and named by Claude.
+
 ### 5.2 Failure cases observed
 - **Seed 2:** the pre-existing object's removal was reported as "placed" (one miss, one false
   positive). The ghost test made the wrong call. Our *likely* explanation, not yet confirmed:
