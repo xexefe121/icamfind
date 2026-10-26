@@ -1,5 +1,6 @@
 """iCamFind command line.
 
+  python -m icamfind pair CODE    connect this computer to your home (code from the web app)
   python -m icamfind run          start the camera memory (opens a preview window)
   python -m icamfind calibrate    draw zones, the door, and the room-map points
   python -m icamfind record       record a clip for evaluation
@@ -31,6 +32,28 @@ def cmd_run(args) -> None:
     if args.source is not None:
         cfg.source = int(args.source) if str(args.source).isdigit() else args.source
     EdgeApp(cfg, show=not args.headless).run(max_seconds=args.max_seconds)
+
+
+def cmd_pair(args) -> None:
+    """Exchange a one-time pairing code from the web app for this camera's credentials."""
+    import requests
+
+    from .edge.config import ENV_FILE, load_env_file
+    import os
+
+    load_env_file()
+    api = (args.api or os.environ.get("ICAMFIND_API_URL") or "").rstrip("/")
+    if not api:
+        sys.exit("Give the web-app address once: python -m icamfind pair CODE --api https://...")
+    r = requests.post(f"{api}/api/device/pair", json={"code": args.code}, timeout=20)
+    if r.status_code != 200:
+        sys.exit(f"Pairing failed: {r.json().get('error', r.text)}")
+    data = r.json()
+    lines = [l for l in (ENV_FILE.read_text().splitlines() if ENV_FILE.exists() else [])
+             if not l.startswith(("ICAMFIND_API_URL=", "ICAMFIND_DEVICE_TOKEN="))]
+    lines += [f"ICAMFIND_API_URL={data['api_url']}", f"ICAMFIND_DEVICE_TOKEN={data['token']}"]
+    ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Connected as '{data['device']['name']}'. Start watching with: python -m icamfind run")
 
 
 def cmd_calibrate(args) -> None:
@@ -111,6 +134,11 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     p = argparse.ArgumentParser(prog="icamfind", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("pair")
+    s.add_argument("code", help="pairing code shown in the web app (Camera > Connect another computer)")
+    s.add_argument("--api", help="web-app address, e.g. https://abc.execute-api.ap-southeast-2.amazonaws.com")
+    s.set_defaults(func=cmd_pair)
 
     s = sub.add_parser("run")
     s.add_argument("--config", default="config.json")

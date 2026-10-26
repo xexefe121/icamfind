@@ -1,12 +1,16 @@
 "use strict";
 
-// iCamFind web UI. Plain ES2020, no build step. Talks to the same-origin HTTP API (see docs/API.md).
+// iCamFind web app. Plain ES2020, no build step. Same-origin HTTP API (docs/API.md); the browser can
+// also be a camera through window.ICamEdge from edge.js (docs/WEB_CAMERA.md).
 (() => {
   const POLL_STATE_MS = 5000;
   const POLL_EVENTS_MS = 10000;
   const POLL_JOB_MS = 1000;
   const JOB_TIMEOUT_MS = 120000;
   const URL_REUSE_MS = 45 * 60 * 1000; // presigned URLs last 1 h; reuse to avoid image flicker
+  const VIEWS = ["ask", "camera", "things", "routines"];
+  const PROC_W = 640; // processing frame width used by the camera engine and zones
+  const ESSENTIALS = ["keys", "wallet", "phone", "glasses", "pill", "medication"];
 
   const TOOL_NAMES = {
     list_objects: "Checked memory",
@@ -15,7 +19,8 @@
     scan_room_for_object: "Scanned the room",
     update_object_status: "Updated memory",
     speak_on_device: "Spoke to you",
-    request_caregiver_notification: "Asked caregiver approval",
+    request_caregiver_notification: "Asked the carer's OK",
+    record_routine_status: "Noted the result",
     final_answer: "Answer",
   };
 
@@ -31,7 +36,7 @@
     ok: ["On track", "status-ok"],
     missed: ["Missed", "status-danger"],
     reminded: ["Reminder given", "status-warn"],
-    escalated: ["Caregiver notified", "status-danger"],
+    escalated: ["Carer asked", "status-danger"],
   };
 
   const state = {
@@ -40,7 +45,8 @@
     me: null,
     households: [],
     household: null, // selected household id (sent as x-icamfind-household)
-    householdInfo: null, // {id, name, demo} from /api/state
+    householdInfo: null,
+    loaded: false, // first /api/state for the current home has arrived
     devices: [],
     device: null,
     objects: [],
@@ -50,7 +56,9 @@
     events: [],
     filter: "all",
     editingId: null,
+    view: "ask",
     job: null,
+    jobTarget: "ask", // "ask" (answer card on Ask) or "dialog" (routine check sheet)
     steps: [],
     jobTimer: null,
     jobStarted: 0,
@@ -58,11 +66,21 @@
     spokenJobs: new Set(),
     timers: {},
     dialogReturnFocus: null,
-    dialogReturnKey: null,
     snapForce: false,
   };
 
+  // Browser camera (this computer watching the room).
+  const cam = {
+    stream: null,
+    engine: null,
+    household: null,
+    status: { state: "off" },
+    paused: false,
+    starting: false,
+  };
+
   const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
   // ---------- Small helpers ----------
 
@@ -76,6 +94,22 @@
         else localStorage.setItem(key, value);
       } catch { /* storage unavailable: settings just won't persist */ }
     },
+    json(key) {
+      try { return JSON.parse(this.get(key) || "null"); } catch { return null; }
+    },
+  };
+
+  const session = {
+    get(key) {
+      try { return sessionStorage.getItem(key); } catch { return null; }
+    },
+    set(key, value) {
+      try {
+        if (value === null || value === undefined) sessionStorage.removeItem(key);
+        else sessionStorage.setItem(key, value);
+        return true;
+      } catch { return false; }
+    },
   };
 
   function esc(value) {
@@ -86,6 +120,10 @@
 
   function safeUrl(u) {
     return typeof u === "string" && /^https?:\/\//i.test(u) ? u : "";
+  }
+
+  function safeDataImage(u) {
+    return typeof u === "string" && /^data:image\/(jpeg|png|webp);base64,/i.test(u) ? u : "";
   }
 
   // Presigned URLs change every poll; keep the first one per object key while it is still valid.
@@ -101,7 +139,7 @@
     return u;
   }
 
-  // The room snapshot may be overwritten in place, so refresh it at least every minute or on demand.
+  // The room snapshot can be replaced in place, so refresh it at least every minute or on demand.
   let snapCache = { key: "", url: "", at: 0 };
   function snapshotUrl(u) {
     u = safeUrl(u);
@@ -151,28 +189,37 @@
 
   function whereText(o) {
     const z = zoneName(o.zone);
-    if (o.status === "removed") return z ? `Taken from the ${z}` : "Taken";
+    if (o.status === "removed") return z ? `Picked up from the ${z}` : "Picked up";
     return z ? `On the ${z}` : "In view of the camera";
   }
 
+  function whereWhen(o) {
+    const z = zoneName(o.zone);
+    if (o.status === "removed") return `Picked up ${relTime(o.last_seen)}${z ? ` from the ${z}` : ""}`;
+    return `${z ? `On the ${z}` : "In view"} · ${relTime(o.last_seen)}`;
+  }
+
   function labelOf(o) {
-    return (o && (o.label || o.local_label)) || "Unnamed object";
+    return (o && (o.label || o.local_label)) || "Unnamed thing";
   }
 
   function plural(n, word) {
     return `${n} ${word}${n === 1 ? "" : "s"}`;
   }
 
+  function fkeySel(key) {
+    return `[data-fkey="${window.CSS && CSS.escape ? CSS.escape(key) : key}"]`;
+  }
+
   // Replace innerHTML only when it changed, keeping keyboard focus on the same logical control.
   function setHtml(el, html) {
-    if (el._html === html) return;
+    if (!el || el._html === html) return;
     const active = document.activeElement;
     const fkey = active && el.contains(active) ? active.getAttribute("data-fkey") : null;
     el.innerHTML = html;
     el._html = html;
     if (fkey) {
-      const sel = `[data-fkey="${window.CSS && CSS.escape ? CSS.escape(fkey) : fkey}"]`;
-      const again = el.querySelector(sel);
+      const again = el.querySelector(fkeySel(fkey));
       if (again) again.focus();
     }
   }
@@ -190,24 +237,52 @@
     toastTimer = setTimeout(() => { t.hidden = true; }, 4500);
   }
 
+  async function copyText(text, label) {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(`${label} copied.`);
+      return;
+    } catch { /* fall back below */ }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+    ta.remove();
+    toast(ok ? `${label} copied.` : "Couldn't copy automatically. Select the text and copy it.");
+  }
+
+  function openDialog(dialog) {
+    state.dialogReturnFocus = document.activeElement;
+    if (typeof dialog.showModal === "function") {
+      if (!dialog.open) dialog.showModal();
+    } else {
+      dialog.setAttribute("open", "");
+    }
+  }
+
+  function closeDialog(dialog) {
+    if (typeof dialog.close === "function" && dialog.open) dialog.close();
+    else if (dialog.hasAttribute("open")) { dialog.removeAttribute("open"); dialog.dispatchEvent(new Event("close")); }
+  }
+
+  function returnFocus() {
+    const back = state.dialogReturnFocus;
+    state.dialogReturnFocus = null;
+    if (back && document.contains(back)) back.focus();
+  }
+
   // ---------- Sign-in: Cognito hosted UI, authorization code + PKCE ----------
 
   const AUTH_KEY = "icamfind.auth";
   const PKCE_KEY = "icamfind.pkce";
   const HOME_KEY = "icamfind.household";
-
-  const session = {
-    get(key) {
-      try { return sessionStorage.getItem(key); } catch { return null; }
-    },
-    set(key, value) {
-      try {
-        if (value === null || value === undefined) sessionStorage.removeItem(key);
-        else sessionStorage.setItem(key, value);
-        return true;
-      } catch { return false; }
-    },
-  };
+  const DISMISS_KEY = "icamfind.dismissed";
 
   function b64url(bytes) {
     let s = "";
@@ -226,9 +301,9 @@
     return b64url(new Uint8Array(digest));
   }
 
-  function jwtExpiryMs(token) {
+  function jwtExpiryMs(jwt) {
     try {
-      const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+      const part = jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
       const bin = atob(part + "===".slice((part.length + 3) % 4));
       const claims = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))));
       return typeof claims.exp === "number" ? claims.exp * 1000 : 0;
@@ -236,10 +311,8 @@
   }
 
   function loadAuth() {
-    try {
-      const a = JSON.parse(store.get(AUTH_KEY) || "null");
-      return a && a.id_token ? a : null;
-    } catch { return null; }
+    const a = store.json(AUTH_KEY);
+    return a && a.id_token ? a : null;
   }
 
   function saveAuth(a) {
@@ -247,7 +320,7 @@
     store.set(AUTH_KEY, a ? JSON.stringify(a) : null);
   }
 
-  function tokenSet(resp, previous) {
+  function authSet(resp, previous) {
     const fallback = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
     return {
       id_token: resp.id_token,
@@ -256,7 +329,7 @@
     };
   }
 
-  async function tokenRequest(params) {
+  async function authRequest(params) {
     const res = await fetch(`${state.config.cognito_domain}/oauth2/token`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -298,27 +371,27 @@
     if (!saved || !saved.verifier || saved.state !== params.get("state")) {
       throw new Error("That sign-in link didn't match or has expired. Please sign in again.");
     }
-    const data = await tokenRequest({
+    const data = await authRequest({
       grant_type: "authorization_code",
       client_id: state.config.client_id,
       code: params.get("code"),
       redirect_uri: state.config.redirect_uri,
       code_verifier: saved.verifier,
     });
-    saveAuth(tokenSet(data, null));
+    saveAuth(authSet(data, null));
   }
 
   let refreshing = null;
-  function refreshTokens() {
+  function refreshAuth() {
     if (refreshing) return refreshing;
     const current = state.auth;
     if (!current || !current.refresh_token || !state.config) return Promise.resolve(false);
-    refreshing = tokenRequest({
+    refreshing = authRequest({
       grant_type: "refresh_token",
       client_id: state.config.client_id,
       refresh_token: current.refresh_token,
     })
-      .then((data) => { saveAuth(tokenSet(data, current)); return true; })
+      .then((data) => { saveAuth(authSet(data, current)); return true; })
       .catch(() => false)
       .finally(() => { refreshing = null; });
     return refreshing;
@@ -326,7 +399,7 @@
 
   async function freshIdToken() {
     if (!state.auth) return null;
-    if (state.auth.expires_at - Date.now() < 60000 && !(await refreshTokens())) return null;
+    if (state.auth.expires_at - Date.now() < 60000 && !(await refreshAuth())) return null;
     return state.auth ? state.auth.id_token : null;
   }
 
@@ -334,6 +407,7 @@
   function expireSession(message) {
     saveAuth(null);
     stopJob();
+    stopBrowserCamera();
     showLogin(message);
   }
 
@@ -343,6 +417,7 @@
     saveAuth(null);
     stopJob();
     stopPolling();
+    stopBrowserCamera();
     if (cfg && cfg.cognito_domain) {
       const q = new URLSearchParams({ client_id: cfg.client_id, logout_uri: cfg.redirect_uri });
       location.assign(`${cfg.cognito_domain}/logout?${q.toString()}`);
@@ -354,12 +429,12 @@
   // ---------- API ----------
 
   async function api(path, opts = {}, retried = false) {
-    const token = await freshIdToken();
-    if (!token) {
+    const idToken = await freshIdToken();
+    if (!idToken) {
       if ($("#login").hidden) expireSession("Your session has ended. Please sign in again.");
       throw new Error("unauthorized");
     }
-    const headers = { authorization: `Bearer ${token}` };
+    const headers = { authorization: `Bearer ${idToken}` };
     if (state.household && !opts.noHousehold) headers["x-icamfind-household"] = state.household;
     const init = { method: opts.method || "GET", headers };
     if (opts.body !== undefined) {
@@ -370,18 +445,18 @@
     try {
       res = await fetch(path, init);
     } catch (err) {
-      toast("Can't reach iCamFind right now. Check the internet connection.");
+      if (!opts.quiet) toast("Can't reach iCamFind right now. Check the internet connection.");
       throw err;
     }
     if (res.status === 401) {
-      if (!retried && (await refreshTokens())) return api(path, opts, true);
+      if (!retried && (await refreshAuth())) return api(path, opts, true);
       if ($("#login").hidden) expireSession("Your session has ended. Please sign in again.");
       throw new Error("unauthorized");
     }
     let data = null;
     try { data = await res.json(); } catch { /* empty or non-JSON body */ }
     if (!res.ok) {
-      const msg = (data && data.error) || `Request failed (${res.status})`;
+      const msg = (data && data.error) || `Something went wrong (${res.status})`;
       if (res.status === 403 || !opts.quiet) toast(msg);
       throw new Error(msg);
     }
@@ -417,14 +492,17 @@
   async function startApp() {
     $("#login").hidden = true;
     $("#app").hidden = false;
+    showView(viewFromHash(), false);
     try {
       await loadMe();
     } catch {
       return; // unauthorized: the sign-in screen is already showing
     }
+    renderAll();
     refreshState();
     refreshEvents();
     startPolling();
+    resumeBrowserCameraIfSetUp();
   }
 
   async function loadMe() {
@@ -443,7 +521,7 @@
     }
   }
 
-  // ---------- Households ----------
+  // ---------- Homes ----------
 
   function currentHousehold() {
     return state.households.find((h) => h.id === state.household) || null;
@@ -455,6 +533,19 @@
     return !!(state.householdInfo && state.householdInfo.demo);
   }
 
+  function isOwner() {
+    const h = currentHousehold();
+    return !!(h && h.role === "owner");
+  }
+
+  function ownHome() {
+    return state.households.find((h) => !h.demo && h.role === "owner") || state.households.find((h) => !h.demo) || null;
+  }
+
+  function demoHome() {
+    return state.households.find((h) => h.demo) || null;
+  }
+
   function householdName(id) {
     const h = state.households.find((x) => x.id === id);
     return (h && h.name) || "this home";
@@ -463,7 +554,7 @@
   function renderHouseholdControls() {
     const sel = $("#household-select");
     const html = state.households
-      .map((h) => `<option value="${esc(h.id)}">${esc(h.name || "Home")}${h.demo ? " (Demo)" : ""}</option>`)
+      .map((h) => `<option value="${esc(h.id)}">${esc(h.name || "Home")}</option>`)
       .join("");
     if (sel._html !== html) {
       sel.innerHTML = html;
@@ -471,25 +562,22 @@
     }
     if (state.household && sel.value !== state.household) sel.value = state.household;
     $("#household-wrap").hidden = state.households.length === 0;
-
-    const demo = isDemo();
-    $("#demo-badge").hidden = !demo;
-    $("#demo-banner").hidden = !demo;
+    $("#demo-badge").hidden = !isDemo();
 
     const email = state.me && state.me.email;
     const u = $("#user-email");
-    u.textContent = email || "";
-    u.title = email ? `Signed in as ${email}` : "";
+    u.textContent = email ? `Signed in as ${email}` : "";
     u.hidden = !email;
   }
 
-  // Everything shown below the header belongs to one household; drop it before switching.
+  // Everything below the top bar belongs to one home; drop it before switching.
   function resetHouseholdState() {
     stopJob();
     state.job = null;
     state.steps = [];
     state.openSteps = new Set();
     state.householdInfo = null;
+    state.loaded = false;
     state.device = null;
     state.devices = [];
     state.objects = [];
@@ -500,24 +588,25 @@
     state.editingId = null;
     imgCache.clear();
     snapCache = { key: "", url: "", at: 0 };
-    hideCameraToken();
     $("#job-area").hidden = true;
     $("#answer-card").hidden = true;
     $("#answer-tools").hidden = true;
     setAskBusy(false);
-    const dialog = $("#object-dialog");
-    if (dialog.open || dialog.hasAttribute("open")) closeDialog();
+    [$("#object-dialog"), $("#job-dialog"), $("#pair-dialog")].forEach((d) => closeDialog(d));
   }
 
   function switchHousehold(id) {
     if (!id || id === state.household) return;
+    stopBrowserCamera();
+    cam.paused = false;
     state.household = id;
     store.set(HOME_KEY, id);
     resetHouseholdState();
+    renderHouseholdControls();
     renderAll();
-    renderEvents();
     refreshState();
     refreshEvents();
+    resumeBrowserCameraIfSetUp();
     toast(`Switched to ${householdName(id)}.`);
   }
 
@@ -525,11 +614,11 @@
     stopPolling();
     state.timers.state = setInterval(() => { if (!document.hidden) refreshState(); }, POLL_STATE_MS);
     state.timers.events = setInterval(() => { if (!document.hidden) refreshEvents(); }, POLL_EVENTS_MS);
+    state.timers.clock = setInterval(() => { if (!document.hidden) renderRelativeTimes(); }, 30000);
   }
 
   function stopPolling() {
-    clearInterval(state.timers.state);
-    clearInterval(state.timers.events);
+    Object.values(state.timers).forEach((t) => clearInterval(t));
     state.timers = {};
   }
 
@@ -537,7 +626,9 @@
     const hh = state.household;
     try {
       const d = await api("api/state", { quiet: true });
-      if (state.household !== hh) return; // household switched while this was in flight
+      if (state.household !== hh) return; // home switched while this was in flight
+      const first = !state.loaded;
+      state.loaded = true;
       state.householdInfo = d.household || null;
       state.devices = Array.isArray(d.devices) ? d.devices : [];
       state.device = d.device || null;
@@ -546,6 +637,7 @@
       state.approvals = Array.isArray(d.approvals) ? d.approvals : [];
       state.routines = Array.isArray(d.routines) ? d.routines : [];
       renderAll();
+      if (first) maybeNudgeSetup();
     } catch { /* toast already shown for network errors */ }
   }
 
@@ -555,130 +647,304 @@
       const d = await api("api/events?limit=50", { quiet: true });
       if (state.household !== hh) return;
       state.events = Array.isArray(d.events) ? d.events : [];
-      renderEvents();
+      renderRecent();
     } catch { /* handled in api() */ }
+  }
+
+  let refreshSoonTimer = null;
+  function refreshSoon() {
+    clearTimeout(refreshSoonTimer);
+    refreshSoonTimer = setTimeout(() => { refreshState(); refreshEvents(); }, 1500);
   }
 
   function renderAll() {
     renderHouseholdControls();
-    renderHeader();
-    renderCameras();
-    renderRoom();
+    renderBanners();
+    renderRecent();
+    renderCamera();
+    renderThingsRoom();
     renderObjects();
-    renderAlerts();
     renderApprovals();
     renderRoutines();
     renderRoutineOptions();
+    renderAlerts();
+    renderTabDots();
     if (state.job) renderAnswer();
   }
 
-  // ---------- Header ----------
+  function renderRelativeTimes() {
+    // Rebuild the lists that show "5 min ago"; setHtml skips unchanged markup.
+    renderRecent();
+    renderObjects();
+    renderCamera();
+  }
 
-  function renderHeader() {
-    const d = state.device;
-    const pill = $("#device-pill");
-    const name = d ? (d.name || d.id || "") : "";
-    const named = name ? ` · ${name}` : "";
-    if (!d) {
-      pill.className = "pill pill-muted";
-      pill.textContent = "Camera not connected yet";
-    } else if (d.online) {
-      pill.className = "pill pill-online";
-      pill.textContent = `Camera online${named} · seen ${relTime(d.last_heartbeat)}`;
-    } else {
-      pill.className = "pill pill-offline";
-      pill.textContent = d.last_heartbeat
-        ? `Camera offline${named} · last seen ${relTime(d.last_heartbeat)}`
-        : `Camera offline${named}`;
+  // ---------- Views (hash routing) ----------
+
+  function viewFromHash() {
+    const h = location.hash.replace(/^#/, "");
+    return VIEWS.includes(h) ? h : "ask";
+  }
+
+  function showView(name, focus) {
+    state.view = name;
+    $$(".view").forEach((v) => { v.hidden = v.getAttribute("data-view") !== name; });
+    $$(".tab").forEach((t) => {
+      if (t.getAttribute("data-view") === name) t.setAttribute("aria-current", "page");
+      else t.removeAttribute("aria-current");
+    });
+    if (name === "camera") renderCamera();
+    if (focus) {
+      const h = $(`#view-${name} h1`);
+      if (h) h.focus({ preventScroll: true });
+      const main = $("#main");
+      if (main.scrollTo) main.scrollTo(0, 0);
+      window.scrollTo(0, 0);
     }
+  }
 
+  function go(view) {
+    if (location.hash === `#${view}`) showView(view, true);
+    else location.hash = `#${view}`;
+  }
+
+  function needsSetup() {
+    return state.loaded && !isDemo() && isOwner() && !state.devices.length && !camConfig();
+  }
+
+  // First visit to your own home with no camera: open the Camera tab once per session.
+  function maybeNudgeSetup() {
+    if (!needsSetup()) return;
+    const key = `icamfind.nudged.${state.household}`;
+    if (session.get(key)) return;
+    session.set(key, "1");
+    if (state.view === "ask") go("camera");
+  }
+
+  function renderTabDots() {
+    $("#tab-cam-dot").hidden = !(cam.engine && cam.status && cam.status.state === "watching");
+    const pending = state.approvals.filter((a) => !a.status || a.status === "pending").length;
+    $("#tab-routines-dot").hidden = pending === 0;
+  }
+
+  // ---------- Ask view: banners and recent activity ----------
+
+  function dismissed() {
+    const list = store.json(DISMISS_KEY);
+    return new Set(Array.isArray(list) ? list : []);
+  }
+
+  function dismiss(key) {
+    const set = dismissed();
+    set.add(key);
+    store.set(DISMISS_KEY, JSON.stringify(Array.from(set).slice(-200)));
+    renderBanners();
+  }
+
+  function renderBanners() {
+    const off = dismissed();
+    const parts = [];
+    if (isDemo()) {
+      const mine = ownHome();
+      parts.push(`<div class="banner"><div class="banner-body">
+        <p><strong>You're in the shared Demo home.</strong> Its camera replays a recorded room around the clock, so you can try everything here.</p>
+        ${mine ? `<div class="banner-actions"><button class="btn btn-small" type="button" data-action="go-home" data-fkey="b-home">Switch to My home</button></div>` : ""}
+      </div></div>`);
+    } else if (needsSetup() && !off.has(`setup.${state.household}`)) {
+      const demo = demoHome();
+      parts.push(`<div class="banner"><div class="banner-body">
+        <p><strong>Set up your camera to start remembering things.</strong> It takes about a minute.</p>
+        <div class="banner-actions">
+          <button class="btn btn-small btn-primary" type="button" data-action="go-camera" data-fkey="b-setup">Set up camera</button>
+          ${demo ? `<button class="btn btn-small" type="button" data-action="go-demo" data-fkey="b-demo">Try the Demo home</button>` : ""}
+        </div></div>
+        <button class="banner-x" type="button" data-action="dismiss" data-key="setup.${esc(state.household)}" aria-label="Dismiss">✕</button></div>`);
+    }
+    state.approvals.filter((a) => (!a.status || a.status === "pending") && !off.has(`apr.${a.id}`)).forEach((a) => {
+      parts.push(`<div class="banner banner-warn"><div class="banner-body">
+        <p><strong>iCamFind would like to tell your carer:</strong></p>
+        <p>${esc(a.message)}</p>
+        ${a.reason ? `<p class="muted small">Why: ${esc(a.reason)}</p>` : ""}
+        <div class="banner-actions">
+          <button class="btn btn-small btn-primary" type="button" data-action="approve" data-id="${esc(a.id)}" data-fkey="b-ap-${esc(a.id)}">Yes, tell them</button>
+          <button class="btn btn-small" type="button" data-action="deny" data-id="${esc(a.id)}" data-fkey="b-dn-${esc(a.id)}">Don't send</button>
+        </div></div>
+        <button class="banner-x" type="button" data-action="dismiss" data-key="apr.${esc(a.id)}" aria-label="Hide for now">✕</button></div>`);
+    });
     const now = Date.now() / 1000;
-    const today = state.alerts.filter((a) => a.ts && now - a.ts < 86400).length;
-    const badge = $("#alerts-badge");
-    badge.hidden = today === 0;
-    $("#alerts-badge-text").textContent = `${plural(today, "alert")} today`;
+    state.alerts
+      .filter((a) => a.ts && now - a.ts < 86400 && !off.has(`alr.${a.id}`))
+      .sort((a, b) => b.ts - a.ts)
+      .slice(0, 3)
+      .forEach((a) => {
+        parts.push(`<div class="banner banner-alert"><div class="banner-body">
+          <p><strong>${esc(a.message || "Alert")}</strong></p>
+          <p class="ev-time">${timeTag(a.ts)}</p></div>
+          <button class="banner-x" type="button" data-action="dismiss" data-key="alr.${esc(a.id)}" aria-label="Dismiss">✕</button></div>`);
+      });
+    setHtml($("#banners"), parts.join(""));
   }
 
-  // ---------- Cameras ----------
-
-  function renderCameras() {
-    const list = $("#cameras-list");
-    const demo = isDemo();
-    const devices = state.devices.slice().sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)));
-    if (!devices.length) {
-      const msg = demo ? "The replay camera hasn't checked in yet." : "No cameras connected yet.";
-      setHtml(list, `<li class="empty">${esc(msg)}</li>`);
-    } else {
-      setHtml(list, devices.map((d) => {
-        const online = !!d.online;
-        return `<li class="camera-item">
-          <div class="camera-head">
-            <strong>${esc(d.name || d.id)}</strong>
-            <span class="pill ${online ? "pill-online" : "pill-offline"}">${online ? "Online" : "Offline"}</span>
-          </div>
-          <p class="ev-time">Last heartbeat ${timeTag(d.last_heartbeat)}</p>
-        </li>`;
-      }).join(""));
+  function eventSentence(e) {
+    const name = e.label || "Something";
+    const z = zoneName(e.zone);
+    switch (e.type) {
+      case "placed": return z ? `${name} on the ${z}` : name;
+      case "removed": return z ? `${name} from the ${z}` : name;
+      case "moved": {
+        const from = zoneName(e.from_zone);
+        if (from && z) return `${name} from the ${from} to the ${z}`;
+        return z ? `${name} to the ${z}` : name;
+      }
+      case "verified": return z ? `${name} is still on the ${z}` : `${name} is still there`;
+      case "corrected": return `${name}: ${e.note || "memory updated"}`;
+      default: return name;
     }
-    const h = currentHousehold();
-    const owner = !!(h && h.role === "owner");
-    $("#camera-demo-note").hidden = !demo;
-    $("#camera-add").hidden = demo || !owner;
-    $("#camera-member-note").hidden = demo || owner || !h;
   }
 
-  function showCameraToken(d) {
-    const panel = $("#camera-token-panel");
-    $("#camera-token-name").textContent = (d.device && (d.device.name || d.device.id)) || "camera";
-    $("#camera-token").value = d.token || "";
-    $("#camera-command").textContent = d.run_command || "";
-    panel.hidden = false;
-    $("#camera-token-title").focus();
-  }
-
-  function hideCameraToken() {
-    $("#camera-token").value = "";
-    $("#camera-command").textContent = "";
-    $("#camera-token-panel").hidden = true;
-  }
-
-  async function copyText(text, label) {
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      toast(`${label} copied.`);
+  function renderRecent() {
+    const list = $("#recent-strip");
+    const items = state.events.slice(0, 5);
+    if (!items.length) {
+      const msg = state.loaded ? "Nothing yet. Things you put down will show up here." : "Loading…";
+      setHtml(list, `<li class="recent-empty">${esc(msg)}</li>`);
       return;
-    } catch { /* fall back below */ }
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    let ok = false;
-    try { ok = document.execCommand("copy"); } catch { ok = false; }
-    ta.remove();
-    toast(ok ? `${label} copied.` : "Couldn't copy automatically. Select the text and copy it.");
+    }
+    setHtml(list, items.map((e) => {
+      const t = EVENT_TYPES[e.type] || { text: "Seen" };
+      const img = stableUrl(e.crop_url);
+      return `<li><button class="recent-item" type="button" data-action="open" data-id="${esc(e.object_id || "")}" data-fkey="r-${esc(e.id)}">
+        ${img ? `<img src="${esc(img)}" alt="" loading="lazy">` : `<span class="thumb-empty"></span>`}
+        <span class="recent-text"><strong>${esc(t.text)}</strong>${esc(eventSentence(e))}<br><span class="muted">${esc(relTime(e.ts))}</span></span>
+      </button></li>`;
+    }).join(""));
   }
 
-  // ---------- Room view ----------
+  // ---------- Camera view ----------
 
-  function renderRoom() {
-    const view = $("#room-view");
+  function camKey(hh) {
+    return `icamfind.browserCam.${hh}`;
+  }
+
+  function camConfig(hh = state.household) {
+    if (!hh) return null;
+    const c = store.json(camKey(hh));
+    return c && c.deviceId && c.token ? c : null;
+  }
+
+  function saveCamConfig(hh, cfg) {
+    store.set(camKey(hh), cfg ? JSON.stringify(cfg) : null);
+  }
+
+  function renderCamera() {
+    const demo = isDemo();
+    const cfg = demo ? null : camConfig();
+    $("#cam-demo").hidden = !demo;
+    $("#cam-live").hidden = demo || !cfg;
+    $("#cam-setup").hidden = demo || !!cfg;
+
+    if (demo) {
+      renderRoom($("#demo-room"));
+      $("#demo-switch-btn").hidden = !ownHome();
+    } else if (!cfg) {
+      const err = $("#cam-setup-error");
+      const btn = $("#cam-setup-btn");
+      if (!window.ICamEdge) {
+        err.textContent = "The camera feature failed to load. Please reload the page.";
+        err.hidden = false;
+        btn.disabled = true;
+      } else if (state.households.length && !isOwner()) {
+        err.textContent = "Only the person who owns this home can add a camera.";
+        err.hidden = false;
+        btn.disabled = true;
+      } else if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        err.textContent = "This browser can't use a camera. Try the latest Chrome, Edge, Safari or Firefox.";
+        err.hidden = false;
+        btn.disabled = true;
+      } else {
+        err.hidden = true;
+        btn.disabled = false;
+      }
+    }
+    renderCamStatus();
+    renderOtherCameras(cfg);
+    $("#pair-btn").hidden = demo || !isOwner();
+  }
+
+  function renderCamStatus() {
+    const el = $("#cam-status");
+    const text = $("#cam-status-text");
+    const s = cam.status || {};
+    let st = s.state || "off";
+    if (cam.paused) st = "paused";
+    let msg;
+    switch (st) {
+      case "loading": msg = s.message || "Getting ready…"; break;
+      case "learning": msg = "Learning the room. Keep still for a few seconds."; break;
+      case "watching": {
+        let n = 0;
+        if (typeof s.objects === "number") n = s.objects;
+        else if (Array.isArray(s.objects)) n = s.objects.filter((o) => o.status !== "removed").length;
+        else if (cam.engine && Array.isArray(cam.engine.objects)) n = cam.engine.objects.filter((o) => o.status !== "removed").length;
+        msg = `Watching the room · ${n} ${n === 1 ? "thing" : "things"} remembered`;
+        break;
+      }
+      case "paused": msg = "Paused. Press Resume to start watching again."; break;
+      case "error": msg = s.message || "The camera stopped. Press Resume to try again."; break;
+      default: msg = cam.starting ? "Starting the camera…" : "Camera is off. Press Resume to start.";
+    }
+    el.setAttribute("data-state", st);
+    if (text.textContent !== msg) text.textContent = msg;
+    const running = !!cam.engine && !cam.paused;
+    $("#cam-pause").textContent = running ? "Pause" : "Resume";
+    const cover = $("#cam-paused-cover");
+    cover.hidden = running || cam.starting;
+    cover.querySelector("p").textContent = cam.paused ? "Camera paused" : "Camera is off";
+    $("#cam-places").disabled = !cam.stream;
+    $("#cam-reset").disabled = !running;
+    renderTabDots();
+  }
+
+  function renderOtherCameras(cfg) {
+    const list = $("#cameras-list");
+    const mine = cfg ? cfg.deviceId : null;
+    const others = state.devices
+      .filter((d) => d.id !== mine)
+      .sort((a, b) => (b.last_heartbeat || 0) - (a.last_heartbeat || 0));
+    $("#others-title").textContent = cfg ? "Other cameras in this home" : "Cameras in this home";
+    if (!others.length) {
+      const msg = !state.loaded ? "Loading…" : (isDemo() ? "The demo camera hasn't checked in yet." : "No other cameras yet.");
+      setHtml(list, `<li class="empty">${esc(msg)}</li>`);
+      return;
+    }
+    setHtml(list, others.map((d) => {
+      const online = !!d.online;
+      const snap = state.device && state.device.id === d.id ? snapshotUrl(state.device.snapshot_url) : "";
+      return `<li class="camera-item">
+        ${snap ? `<img src="${esc(snap)}" alt="Latest picture from ${esc(d.name || "this camera")}">` : `<span class="thumb-empty" aria-hidden="true"></span>`}
+        <div class="cam-meta">
+          <p><strong>${esc(d.name || "Camera")}</strong></p>
+          <p class="ev-time">${online ? "Watching now" : `Last seen ${esc(relTime(d.last_heartbeat))}`}</p>
+        </div>
+        <span class="pill ${online ? "pill-online" : "pill-offline"}">${online ? "Online" : "Offline"}</span>
+      </li>`;
+    }).join(""));
+  }
+
+  // Room picture with zones and markers (demo camera, and remote cameras on Things).
+  function renderRoom(view) {
     const d = state.device;
     const fs = d && Array.isArray(d.frame_size) && d.frame_size.length === 2 ? d.frame_size : null;
     const snap = d ? snapshotUrl(d.snapshot_url) : "";
     if (!fs && !snap) {
       view.style.aspectRatio = "";
-      setHtml(view, `<p class="placeholder">No camera view yet. Press “Refresh camera view” once the camera is online.</p>`);
+      setHtml(view, `<p class="placeholder">No picture from the camera yet.</p>`);
       return;
     }
     const [w, h] = fs || [640, 480];
     view.style.aspectRatio = `${w} / ${h}`;
     const font = Math.max(14, Math.round(w / 38));
     const doorZone = d && d.door_zone;
-
     const zones = (d && Array.isArray(d.zones) ? d.zones : []).map((z) => {
       const pts = Array.isArray(z.polygon) ? z.polygon : [];
       if (pts.length < 3) return "";
@@ -686,11 +952,9 @@
       const cx = pts.reduce((s, p) => s + Number(p[0]), 0) / pts.length;
       const cy = pts.reduce((s, p) => s + Number(p[1]), 0) / pts.length;
       const cls = z.name === doorZone ? "zone-shape zone-door" : "zone-shape";
-      const label = z.name === doorZone ? `${z.name} (door)` : z.name;
-      return `<polygon class="${cls}" points="${esc(points)}"><title>${esc(label)}</title></polygon>` +
-        `<text class="zone-label" x="${cx}" y="${cy}" font-size="${font}" text-anchor="middle">${esc(label)}</text>`;
+      return `<polygon class="${cls}" points="${esc(points)}"><title>${esc(z.name)}</title></polygon>` +
+        `<text class="zone-label" x="${cx}" y="${cy}" font-size="${font}" text-anchor="middle">${esc(z.name)}</text>`;
     }).join("");
-
     const markers = state.objects
       .filter((o) => o.status !== "removed" && Array.isArray(o.bbox) && o.bbox.length === 4)
       .map((o) => {
@@ -699,20 +963,621 @@
         const cy = y + bh / 2;
         const r = Math.max(8, Math.round(w / 70));
         const name = labelOf(o);
-        const aria = `${name}, ${whereText(o).toLowerCase()}, seen ${relTime(o.last_seen)}. Open details.`;
+        const aria = `${name}, ${whereText(o).toLowerCase()}. Open details.`;
         return `<g class="marker${o.essential ? " essential" : ""}" role="button" tabindex="0" data-id="${esc(o.id)}" data-fkey="m-${esc(o.id)}" aria-label="${esc(aria)}">` +
           `<circle cx="${cx}" cy="${cy}" r="${r}"></circle>` +
           `<text x="${cx}" y="${cy - r - 6}" font-size="${Math.round(font * 0.85)}" text-anchor="middle">${esc(name)}</text></g>`;
       }).join("");
-
-    const noImg = snap ? "" :
-      `<text x="${w / 2}" y="${h / 2}" font-size="${font}" text-anchor="middle" class="zone-label">No picture yet — press “Refresh camera view”</text>`;
-
-    const img = snap ? `<img src="${esc(snap)}" alt="Latest camera view of the room. People are blurred.">` : "";
-    setHtml(view, `${img}<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="group" aria-label="Zones and remembered objects">${zones}${noImg}${markers}</svg>`);
+    const img = snap ? `<img src="${esc(snap)}" alt="Latest camera picture of the room. People are blurred.">` : "";
+    setHtml(view, `${img}<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="group" aria-label="Places and remembered things">${zones}${markers}</svg>`);
   }
 
-  // ---------- Objects ----------
+  function renderThingsRoom() {
+    const wrap = $("#things-room-wrap");
+    const cfg = camConfig();
+    const d = state.device;
+    const remote = d && (!cfg || d.id !== cfg.deviceId) && (d.snapshot_url || d.frame_size);
+    wrap.hidden = !remote;
+    if (remote) renderRoom($("#things-room"));
+  }
+
+  async function requestSnapshot() {
+    try {
+      await api("api/snapshot", { method: "POST" });
+      toast("Asking the camera for a fresh picture…");
+      const again = () => { state.snapForce = true; refreshState(); };
+      setTimeout(again, 4000);
+      setTimeout(again, 9000);
+    } catch { /* toast shown */ }
+  }
+
+  // ---------- Browser camera ----------
+
+  async function openStream(cameraId) {
+    const video = { width: { ideal: 1280 }, height: { ideal: 720 } };
+    if (cameraId) video.deviceId = { exact: cameraId };
+    try {
+      return await navigator.mediaDevices.getUserMedia({ video, audio: false });
+    } catch (err) {
+      if (cameraId && err && (err.name === "OverconstrainedError" || err.name === "NotFoundError")) {
+        delete video.deviceId; // that camera is gone; use the default one
+        return navigator.mediaDevices.getUserMedia({ video, audio: false });
+      }
+      throw err;
+    }
+  }
+
+  function stopTracks(stream) {
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+  }
+
+  function cameraErrorText(err) {
+    const name = err && err.name;
+    if (name === "NotAllowedError" || name === "SecurityError") {
+      return "Camera access is blocked. Click the camera icon in the address bar, choose Allow, then try again.";
+    }
+    if (name === "NotFoundError" || name === "OverconstrainedError") {
+      return "No camera was found. Plug in a webcam or use a laptop with a built-in camera.";
+    }
+    if (name === "NotReadableError" || name === "AbortError") {
+      return "The camera is busy. Close other apps using it (like video calls) and try again.";
+    }
+    return "The camera couldn't start. Please try again.";
+  }
+
+  function waitForVideo(video) {
+    return new Promise((resolve) => {
+      if (video.readyState >= 1 && video.videoWidth) { resolve(); return; }
+      const done = () => { video.removeEventListener("loadedmetadata", done); resolve(); };
+      video.addEventListener("loadedmetadata", done);
+      setTimeout(done, 4000);
+    });
+  }
+
+  function setFrameAspect(frame, video) {
+    const w = video.videoWidth || 1280;
+    const h = video.videoHeight || 720;
+    frame.style.setProperty("--ar", String(w / h));
+    return { w, h };
+  }
+
+  async function attachStream(video, stream, frame) {
+    video.srcObject = stream;
+    try { await video.play(); } catch { /* autoplay with muted should work; ignore */ }
+    await waitForVideo(video);
+    if (frame) setFrameAspect(frame, video);
+  }
+
+  function setCamStatus(s) {
+    cam.status = s;
+    renderCamStatus();
+  }
+
+  // Start (or resume) this browser as the current home's camera. Reuses `stream` when given.
+  async function startBrowserCamera(stream) {
+    const hh = state.household;
+    const cfg = camConfig(hh);
+    if (!cfg || isDemo() || cam.starting) { if (stream && stream !== cam.stream) stopTracks(stream); return; }
+    if (!window.ICamEdge) {
+      setCamStatus({ state: "error", message: "The camera feature failed to load. Please reload the page." });
+      return;
+    }
+    cam.starting = true;
+    cam.paused = false;
+    setCamStatus({ state: "loading", message: "Starting the camera…" });
+    try {
+      if (!stream) stream = await openStream(cfg.cameraId);
+      if (state.household !== hh) { stopTracks(stream); return; }
+      cam.stream = stream;
+      const video = $("#cam-video");
+      await attachStream(video, stream, $("#cam-frame"));
+      setCamStatus({ state: "loading", message: "Getting ready… (the first time takes a moment)" });
+      await window.ICamEdge.load();
+      if (state.household !== hh || cam.stream !== stream) return;
+      const overlay = $("#cam-overlay");
+      cam.engine = window.ICamEdge.create({
+        video,
+        overlay,
+        apiBase: "",
+        deviceToken: cfg.token,
+        zones: cfg.zones || [],
+        doorZone: cfg.doorZone || null,
+        essentials: ESSENTIALS,
+        onEvent: (ev) => { showEventToast(ev); refreshSoon(); },
+        onStatus: (s) => { if (state.household === hh) setCamStatus(s || {}); },
+        onAlert: (a) => { if (a && a.message) toast(a.message); refreshSoon(); },
+      });
+      cam.household = hh;
+      cam.engine.start();
+    } catch (err) {
+      stopTracks(stream);
+      if (cam.stream === stream) cam.stream = null;
+      cam.engine = null;
+      const msg = err && err.name ? cameraErrorText(err) : "The camera feature couldn't start. Check the internet connection and try again.";
+      setCamStatus({ state: "error", message: msg });
+    } finally {
+      cam.starting = false;
+      renderCamStatus();
+    }
+  }
+
+  function stopBrowserCamera() {
+    if (cam.engine) {
+      try { cam.engine.stop(); } catch { /* already stopped */ }
+    }
+    cam.engine = null;
+    stopTracks(cam.stream);
+    cam.stream = null;
+    const v = $("#cam-video");
+    if (v) v.srcObject = null;
+    cam.household = null;
+    cam.status = { state: "off" };
+    renderCamStatus();
+  }
+
+  function resumeBrowserCameraIfSetUp() {
+    if (!isDemo() && camConfig() && !cam.paused && !cam.engine) startBrowserCamera();
+  }
+
+  function pauseOrResume() {
+    if (cam.engine && !cam.paused) {
+      stopBrowserCamera();
+      cam.paused = true;
+      renderCamStatus();
+      toast("Paused. The camera is off.");
+    } else {
+      cam.paused = false;
+      startBrowserCamera();
+    }
+  }
+
+  function forgetThisCamera() {
+    if (!window.confirm("Stop using this computer as a camera for this home? Things already remembered stay in memory.")) return;
+    stopBrowserCamera();
+    cam.paused = false;
+    saveCamConfig(state.household, null);
+    renderAll();
+    toast("This computer is no longer watching the room.");
+  }
+
+  let eventToastTimer = null;
+  function showEventToast(ev) {
+    if (!ev) return;
+    const label = ev.label && ev.label !== "object" ? ev.label : "something";
+    const z = zoneName(ev.zone);
+    let text;
+    if (ev.type === "removed") text = `<strong>Picked up:</strong> ${esc(label)}${z ? ` from the ${esc(z)}` : ""}`;
+    else if (ev.type === "moved") text = `<strong>Moved:</strong> ${esc(label)}${z ? ` to the ${esc(z)}` : ""}`;
+    else text = `<strong>Remembered:</strong> ${esc(label)}${z ? ` on the ${esc(z)}` : ""}`;
+    const img = safeDataImage(ev.cropDataUrl);
+    const el = $("#event-toast");
+    el.innerHTML = `${img ? `<img src="${esc(img)}" alt="">` : ""}<span>${text}</span>`;
+    el.hidden = false;
+    clearTimeout(eventToastTimer);
+    eventToastTimer = setTimeout(() => { el.hidden = true; }, 5000);
+  }
+
+  // ---------- Setup wizard ----------
+
+  const wiz = {
+    mode: "setup", // "setup" (new camera) or "edit" (change places of the running camera)
+    step: 1,
+    stream: null,
+    ownsStream: false,
+    cameras: [],
+    cameraId: null,
+    zones: [],
+    doorZone: null,
+    pending: null,
+    drag: null,
+    procH: 360,
+    ready: null, // promise from ICamEdge.load()
+    loaded: false,
+  };
+
+  function openWizard(mode) {
+    const dialog = $("#wizard");
+    wiz.mode = mode;
+    wiz.pending = null;
+    wiz.drag = null;
+    $("#wiz-cam-error").hidden = true;
+    $("#wiz-finish-error").hidden = true;
+    if (mode === "edit") {
+      const cfg = camConfig() || {};
+      wiz.zones = (cfg.zones || []).map((z) => ({ name: z.name, polygon: z.polygon.map((p) => p.slice()) }));
+      wiz.doorZone = cfg.doorZone || null;
+      wiz.stream = cam.stream;
+      wiz.ownsStream = false;
+      openDialog(dialog);
+      setWizStep(2);
+    } else {
+      wiz.zones = [];
+      wiz.doorZone = null;
+      wiz.stream = null;
+      wiz.ownsStream = false;
+      wiz.cameraId = null;
+      $("#wiz-video-placeholder").hidden = false;
+      $("#wiz-cam-pick").hidden = true;
+      $("#wiz-ready").textContent = "";
+      $("#wiz-video").srcObject = null;
+      openDialog(dialog);
+      setWizStep(1);
+    }
+  }
+
+  function closeWizard() {
+    closeDialog($("#wizard"));
+  }
+
+  function onWizardClosed() {
+    if (wiz.ownsStream) stopTracks(wiz.stream);
+    wiz.stream = null;
+    wiz.ownsStream = false;
+    $("#wiz-video").srcObject = null;
+    $("#draw-video").srcObject = null;
+    returnFocus();
+  }
+
+  function setWizStep(n) {
+    wiz.step = n;
+    [1, 2, 3].forEach((i) => { $(`#wiz-step-${i}`).hidden = i !== n; });
+    $$(".wiz-steps li").forEach((li) => {
+      const s = Number(li.getAttribute("data-step"));
+      if (s === n) li.setAttribute("aria-current", "step"); else li.removeAttribute("aria-current");
+      li.classList.toggle("done", s < n);
+      li.hidden = wiz.mode === "edit" && s !== 2;
+    });
+    const next = $("#wiz-next");
+    const back = $("#wiz-back");
+    back.hidden = wiz.mode === "edit" || n === 1;
+    if (n === 1) {
+      next.textContent = wiz.stream ? "Next" : "Turn on camera";
+      next.disabled = false;
+    } else if (n === 2) {
+      next.textContent = wiz.mode === "edit" ? "Save places" : "Next";
+      enterPlacesStep();
+    } else {
+      next.textContent = "Start watching";
+      next.disabled = false;
+    }
+    const title = $(`#wiz-step-${n} .wiz-title`);
+    if (title) title.focus();
+  }
+
+  function kickOffEngineLoad() {
+    if (wiz.ready || !window.ICamEdge) return;
+    const note = $("#wiz-ready");
+    note.innerHTML = `<span class="spinner" aria-hidden="true"></span> Getting ready… (the first time takes a moment)`;
+    wiz.ready = window.ICamEdge.load()
+      .then(() => { wiz.loaded = true; note.textContent = "Ready."; })
+      .catch(() => {
+        wiz.ready = null;
+        note.textContent = "Couldn't finish getting ready. Check the internet connection. We'll try again when you finish.";
+      });
+  }
+
+  async function turnOnCamera(cameraId) {
+    const err = $("#wiz-cam-error");
+    err.hidden = true;
+    const next = $("#wiz-next");
+    next.disabled = true;
+    next.textContent = "Starting camera…";
+    try {
+      const stream = await openStream(cameraId || null);
+      if (wiz.ownsStream) stopTracks(wiz.stream);
+      wiz.stream = stream;
+      wiz.ownsStream = true;
+      const track = stream.getVideoTracks()[0];
+      const settings = track && track.getSettings ? track.getSettings() : {};
+      wiz.cameraId = settings.deviceId || cameraId || null;
+      await attachStream($("#wiz-video"), stream, $("#wiz-video").parentElement);
+      $("#wiz-video-placeholder").hidden = true;
+      kickOffEngineLoad();
+      await listCameras();
+      next.textContent = "Next";
+    } catch (e) {
+      err.textContent = cameraErrorText(e);
+      err.hidden = false;
+      next.textContent = "Try again";
+    } finally {
+      next.disabled = false;
+    }
+  }
+
+  async function listCameras() {
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      wiz.cameras = all.filter((d) => d.kind === "videoinput");
+    } catch { wiz.cameras = []; }
+    const pick = $("#wiz-cam-pick");
+    if (wiz.cameras.length < 2) { pick.hidden = true; return; }
+    const sel = $("#wiz-camera-select");
+    sel.innerHTML = wiz.cameras
+      .map((c, i) => `<option value="${esc(c.deviceId)}">${esc(c.label || `Camera ${i + 1}`)}</option>`)
+      .join("");
+    if (wiz.cameraId) sel.value = wiz.cameraId;
+    pick.hidden = false;
+  }
+
+  // --- Places (zones) editor ---
+
+  function enterPlacesStep() {
+    const video = $("#draw-video");
+    const frame = $("#draw-frame");
+    if (wiz.stream && video.srcObject !== wiz.stream) {
+      attachStream(video, wiz.stream, frame).then(sizeDrawCanvas);
+    } else {
+      sizeDrawCanvas();
+    }
+    hideNamePanel();
+    renderPlaces();
+  }
+
+  function sizeDrawCanvas() {
+    const video = $("#draw-video");
+    const { w, h } = setFrameAspect($("#draw-frame"), video);
+    wiz.procH = Math.round(PROC_W * h / w);
+    const c = $("#draw-canvas");
+    c.width = PROC_W;
+    c.height = wiz.procH;
+    drawPlaces();
+  }
+
+  function canvasPoint(e) {
+    const c = $("#draw-canvas");
+    const r = c.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width) * c.width;
+    const y = ((e.clientY - r.top) / r.height) * c.height;
+    return [Math.max(0, Math.min(c.width, x)), Math.max(0, Math.min(c.height, y))];
+  }
+
+  function rectPolygon(x0, y0, x1, y1) {
+    const [a, b] = [Math.round(Math.min(x0, x1)), Math.round(Math.min(y0, y1))];
+    const [c, d] = [Math.round(Math.max(x0, x1)), Math.round(Math.max(y0, y1))];
+    return [[a, b], [c, b], [c, d], [a, d]];
+  }
+
+  function drawPlaces() {
+    const c = $("#draw-canvas");
+    const ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, c.width, c.height);
+    const font = Math.max(14, Math.round(c.width / 36));
+    ctx.font = `700 ${font}px system-ui, sans-serif`;
+    const drawPoly = (poly, color, fill, dashed, label) => {
+      ctx.beginPath();
+      poly.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+      ctx.closePath();
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.setLineDash(dashed ? [8, 6] : []);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = color;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (label) {
+        const x = poly[0][0] + 6;
+        const y = poly[0][1] + font + 4;
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "rgba(0,0,0,.7)";
+        ctx.strokeText(label, x, y);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(label, x, y);
+      }
+    };
+    wiz.zones.forEach((z) => {
+      const door = z.name === wiz.doorZone;
+      drawPoly(z.polygon, door ? "#f0a03c" : "#4fc2b9", door ? "rgba(240,160,60,.18)" : "rgba(79,194,185,.18)", door, z.name);
+    });
+    const p = wiz.drag || wiz.pending;
+    if (p) drawPoly(rectPolygon(p.x0, p.y0, p.x1, p.y1), "#ffffff", "rgba(255,255,255,.15)", true, "");
+  }
+
+  function renderPlaces() {
+    const list = $("#places-list");
+    if (!wiz.zones.length) {
+      list.innerHTML = `<li class="empty">No places yet. Drag a box over the picture.</li>`;
+    } else {
+      list.innerHTML = wiz.zones.map((z, i) => {
+        const door = z.name === wiz.doorZone;
+        return `<li class="${door ? "is-door" : ""}"><span class="swatch" aria-hidden="true"></span>
+          <span class="place-name">${esc(z.name)}${door ? " · exit door" : ""}</span>
+          <button class="btn btn-ghost btn-icon btn-small" type="button" data-remove="${i}" aria-label="Remove ${esc(z.name)}">✕</button></li>`;
+      }).join("");
+    }
+    if (wiz.step === 2) $("#wiz-next").disabled = !wiz.zones.some((z) => z.name !== wiz.doorZone);
+    drawPlaces();
+  }
+
+  function showNamePanel() {
+    $("#name-panel").hidden = false;
+    $("#place-name").value = "";
+    const first = $("#name-panel .chip");
+    if (first) first.focus();
+  }
+
+  function hideNamePanel() {
+    $("#name-panel").hidden = true;
+    wiz.pending = null;
+  }
+
+  function uniquePlaceName(base) {
+    const names = new Set(wiz.zones.map((z) => z.name));
+    if (!names.has(base)) return base;
+    let i = 2;
+    while (names.has(`${base} ${i}`)) i += 1;
+    return `${base} ${i}`;
+  }
+
+  function addPlace(rawName) {
+    const p = wiz.pending;
+    if (!p) return;
+    const clean = String(rawName || "").trim().toLowerCase().replace(/\s+/g, " ").slice(0, 30);
+    if (!clean) { $("#place-name").focus(); return; }
+    const isDoor = clean === "door";
+    const name = uniquePlaceName(clean);
+    wiz.zones.push({ name, polygon: rectPolygon(p.x0, p.y0, p.x1, p.y1) });
+    if (isDoor) wiz.doorZone = name;
+    hideNamePanel();
+    renderPlaces();
+    $("#draw-canvas").focus();
+  }
+
+  function addWholePicture() {
+    wiz.pending = { x0: 0, y0: 0, x1: PROC_W, y1: wiz.procH };
+    addPlace("room");
+  }
+
+  function bindDrawing() {
+    const c = $("#draw-canvas");
+    c.setAttribute("tabindex", "0");
+    c.addEventListener("pointerdown", (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      e.preventDefault();
+      const [x, y] = canvasPoint(e);
+      wiz.drag = { x0: x, y0: y, x1: x, y1: y };
+      wiz.pending = null;
+      $("#name-panel").hidden = true;
+      try { c.setPointerCapture(e.pointerId); } catch { /* not supported */ }
+      drawPlaces();
+    });
+    c.addEventListener("pointermove", (e) => {
+      if (!wiz.drag) return;
+      const [x, y] = canvasPoint(e);
+      wiz.drag.x1 = x;
+      wiz.drag.y1 = y;
+      drawPlaces();
+    });
+    const end = () => {
+      if (!wiz.drag) return;
+      const d = wiz.drag;
+      wiz.drag = null;
+      if (Math.abs(d.x1 - d.x0) >= 16 && Math.abs(d.y1 - d.y0) >= 16) {
+        wiz.pending = d;
+        showNamePanel();
+      }
+      drawPlaces();
+    };
+    c.addEventListener("pointerup", end);
+    c.addEventListener("pointercancel", () => { wiz.drag = null; drawPlaces(); });
+
+    $("#name-panel").addEventListener("click", (e) => {
+      const chip = e.target.closest("[data-place]");
+      if (chip) addPlace(chip.getAttribute("data-place"));
+    });
+    $("#place-custom").addEventListener("submit", (e) => {
+      e.preventDefault();
+      addPlace($("#place-name").value);
+    });
+    $("#place-cancel").addEventListener("click", () => { hideNamePanel(); drawPlaces(); });
+    $("#places-list").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-remove]");
+      if (!b) return;
+      const i = Number(b.getAttribute("data-remove"));
+      const [gone] = wiz.zones.splice(i, 1);
+      if (gone && gone.name === wiz.doorZone) wiz.doorZone = null;
+      renderPlaces();
+    });
+    $("#place-whole").addEventListener("click", addWholePicture);
+    window.addEventListener("resize", () => { if ($("#wizard").open && wiz.step === 2) drawPlaces(); });
+  }
+
+  async function wizNext() {
+    if (wiz.step === 1) {
+      if (!wiz.stream) { await turnOnCamera(null); return; }
+      setWizStep(2);
+    } else if (wiz.step === 2) {
+      if (!wiz.zones.some((z) => z.name !== wiz.doorZone)) return;
+      if (wiz.mode === "edit") { await savePlacesForRunningCamera(); return; }
+      setWizStep(3);
+    } else {
+      await finishSetup();
+    }
+  }
+
+  async function savePlacesForRunningCamera() {
+    const cfg = camConfig();
+    if (!cfg) { closeWizard(); return; }
+    cfg.zones = wiz.zones;
+    cfg.doorZone = wiz.doorZone;
+    saveCamConfig(state.household, cfg);
+    if (cam.engine && typeof cam.engine.setZones === "function") cam.engine.setZones(cfg.zones, cfg.doorZone);
+    try {
+      await api(`api/devices/${encodeURIComponent(cfg.deviceId)}/zones`, {
+        method: "PUT", body: { zones: cfg.zones, door_zone: cfg.doorZone }, quiet: true,
+      });
+    } catch { /* places still apply locally; the camera re-sends them with its next check-in */ }
+    closeWizard();
+    toast("Places saved.");
+  }
+
+  async function finishSetup() {
+    const next = $("#wiz-next");
+    const err = $("#wiz-finish-error");
+    err.hidden = true;
+    next.disabled = true;
+    next.innerHTML = `<span class="spinner" aria-hidden="true"></span> Starting…`;
+    const hh = state.household;
+    try {
+      if (!wiz.loaded) {
+        if (!wiz.ready) kickOffEngineLoad();
+        if (wiz.ready) await wiz.ready;
+        if (!wiz.loaded) await window.ICamEdge.load();
+      }
+      const d = await api("api/devices", { method: "POST", body: { name: "This computer", kind: "browser" } });
+      const id = d.device && d.device.id;
+      const secret = d.token;
+      if (!id || !secret) throw new Error("setup");
+      const cfg = { deviceId: id, token: secret, zones: wiz.zones, doorZone: wiz.doorZone, cameraId: wiz.cameraId };
+      saveCamConfig(hh, cfg);
+      try {
+        await api(`api/devices/${encodeURIComponent(id)}/zones`, {
+          method: "PUT", body: { zones: cfg.zones, door_zone: cfg.doorZone }, quiet: true,
+        });
+      } catch { /* the camera sends its places with each check-in anyway */ }
+      const stream = wiz.stream;
+      wiz.ownsStream = false; // hand the running camera over to the live view
+      closeWizard();
+      go("camera");
+      renderAll();
+      await startBrowserCamera(stream);
+      toast("Your camera is on. Put something down to try it.");
+    } catch (e) {
+      err.textContent = (e && e.message && e.message !== "setup" && e.message !== "unauthorized")
+        ? `Couldn't finish setting up: ${e.message}`
+        : "Couldn't finish setting up. Please check the internet connection and try again.";
+      err.hidden = false;
+    } finally {
+      next.disabled = false;
+      next.textContent = "Start watching";
+    }
+  }
+
+  // ---------- Connect another computer ----------
+
+  async function openPairDialog() {
+    const dialog = $("#pair-dialog");
+    $("#pair-loading").hidden = false;
+    $("#pair-ready").hidden = true;
+    $("#pair-error").hidden = true;
+    openDialog(dialog);
+    $("#pair-close").focus();
+    try {
+      const d = await api("api/devices/pair-code", { method: "POST", body: { name: "Another camera" }, quiet: true });
+      const code = String(d.code || "");
+      if (!code) throw new Error("no code");
+      $("#pair-code").textContent = code;
+      $("#pair-command").textContent = d.command || `python -m icamfind pair ${code}`;
+      $("#pair-loading").hidden = true;
+      $("#pair-ready").hidden = false;
+    } catch (e) {
+      $("#pair-loading").hidden = true;
+      const err = $("#pair-error");
+      err.textContent = "Couldn't make a code right now. Please try again in a moment.";
+      err.hidden = false;
+    }
+  }
+
+  // ---------- Things ----------
 
   function renderObjects(force) {
     if (state.editingId && !force) return; // don't clobber an inline rename in progress
@@ -721,10 +1586,13 @@
     if (state.filter === "present") list = list.filter((o) => o.status !== "removed");
     if (state.filter === "removed") list = list.filter((o) => o.status === "removed");
     if (!list.length) {
-      const msg = state.objects.length
-        ? "Nothing matches this filter."
-        : "Nothing remembered yet. Put something down where the camera can see it.";
-      setHtml(grid, `<p class="placeholder">${msg}</p>`);
+      let msg = "Loading…";
+      if (state.loaded) {
+        msg = state.objects.length
+          ? "Nothing here with this filter."
+          : "Nothing remembered yet. Put something down where the camera can see it.";
+      }
+      setHtml(grid, `<p class="placeholder">${esc(msg)}</p>`);
       return;
     }
     setHtml(grid, list.map(objectCard).join(""));
@@ -746,14 +1614,11 @@
     const photo = img
       ? `<img class="obj-photo" src="${esc(img)}" alt="Photo of ${esc(name)}" loading="lazy">`
       : `<div class="obj-photo-empty" aria-hidden="true">No photo</div>`;
-    const chip = removed
-      ? `<span class="status-chip status-muted">Taken</span>`
-      : `<span class="status-chip status-ok">On a surface</span>`;
     const editing = state.editingId === o.id;
     const rename = editing ? `
       <form class="rename-form" data-id="${id}">
         <label class="visually-hidden" for="rn-${cssId(o.id)}">New name for ${esc(name)}</label>
-        <input id="rn-${cssId(o.id)}" name="label" value="${esc(name)}" maxlength="60" required>
+        <input id="rn-${cssId(o.id)}" name="label" type="text" value="${esc(name)}" maxlength="60" required>
         <button class="btn btn-small btn-primary" type="submit">Save</button>
         <button class="btn btn-small" type="button" data-action="cancel-rename">Cancel</button>
       </form>` : "";
@@ -763,14 +1628,13 @@
           ${photo}
           <div class="obj-info">
             <p class="obj-label">${o.essential ? '<span aria-hidden="true">★ </span>' : ""}${esc(name)}</p>
-            <p class="obj-where">${esc(whereText(o))} · ${timeTag(o.last_seen)}</p>
+            <p class="obj-where">${esc(whereWhen(o))}</p>
           </div>
         </button>
         <div class="obj-actions">
-          ${chip}
           <button class="btn btn-small star-btn" type="button" data-action="star" data-id="${id}" data-fkey="star-${id}"
-            aria-pressed="${o.essential ? "true" : "false"}" title="Essential items trigger the leaving-the-house alert">
-            <span aria-hidden="true">${o.essential ? "★" : "☆"}</span> Essential
+            aria-pressed="${o.essential ? "true" : "false"}" title="Important things get a reminder if you leave without them">
+            <span aria-hidden="true">${o.essential ? "★" : "☆"}</span> Important
           </button>
           <button class="btn btn-small" type="button" data-action="rename" data-id="${id}" data-fkey="rename-${id}">Rename</button>
         </div>
@@ -791,26 +1655,19 @@
     }
   }
 
-  // ---------- Object detail dialog ----------
-
   async function openObject(id) {
+    if (!id) return;
     const dialog = $("#object-dialog");
-    state.dialogReturnFocus = document.activeElement;
-    state.dialogReturnKey = document.activeElement ? document.activeElement.getAttribute("data-fkey") : null;
     const known = state.objects.find((o) => o.id === id);
-    $("#dialog-title").textContent = known ? labelOf(known) : "Object";
+    $("#dialog-title").textContent = known ? labelOf(known) : "Thing";
     $("#dialog-body").innerHTML = `<p class="muted">Loading history…</p>`;
-    if (typeof dialog.showModal === "function") {
-      if (!dialog.open) dialog.showModal();
-    } else {
-      dialog.setAttribute("open", "");
-    }
+    openDialog(dialog);
     $("#dialog-close").focus();
     try {
       const d = await api(`api/objects/${encodeURIComponent(id)}`);
       renderObjectDetail(d.object || known || {}, Array.isArray(d.events) ? d.events : []);
     } catch {
-      $("#dialog-body").innerHTML = `<p class="error-text">Couldn't load this object's history.</p>`;
+      $("#dialog-body").innerHTML = `<p class="error-text">Couldn't load the history of this thing.</p>`;
     }
   }
 
@@ -822,118 +1679,48 @@
       ["Where", whereText(o)],
       ["Last seen", o.last_seen ? `${relTime(o.last_seen)} (${absTime(o.last_seen)})` : "never"],
       ["First seen", o.first_seen ? absTime(o.first_seen) : "—"],
-      ["Camera saw", o.local_label || "object"],
-      ["Description", o.description || "—"],
-      ["Essential", o.essential ? "Yes — reminds you at the door" : "No"],
+      ["Looks like", o.description || "—"],
+      ["Important", o.essential ? "Yes, you get a reminder at the door" : "No"],
     ];
     const history = events.length
-      ? `<ol class="timeline">${events.map((e) => eventRow(e, false)).join("")}</ol>`
+      ? `<ol class="timeline">${events.map(eventRow).join("")}</ol>`
       : `<p class="muted">No history yet.</p>`;
     $("#dialog-body").innerHTML = `
       <div class="detail-top">
         ${img ? `<img src="${esc(img)}" alt="Photo of ${esc(name)}">` : `<div class="obj-photo-empty" aria-hidden="true">No photo</div>`}
         <dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
       </div>
-      <h3>History</h3>
+      <h3 class="small-title">History</h3>
       ${history}`;
   }
 
-  function closeDialog() {
-    const dialog = $("#object-dialog");
-    if (typeof dialog.close === "function" && dialog.open) dialog.close();
-    else { dialog.removeAttribute("open"); onDialogClosed(); }
-  }
-
-  function onDialogClosed() {
-    // The opener may have been re-rendered while the dialog was open; find it again by its focus key.
-    let back = state.dialogReturnFocus;
-    const key = state.dialogReturnKey;
-    state.dialogReturnFocus = null;
-    state.dialogReturnKey = null;
-    if ((!back || !document.contains(back)) && key) {
-      back = document.querySelector(`[data-fkey="${window.CSS && CSS.escape ? CSS.escape(key) : key}"]`);
-    }
-    if (back && document.contains(back)) back.focus();
-  }
-
-  // ---------- Timeline ----------
-
-  function eventSentence(e) {
-    const name = e.label || "Something";
-    const z = zoneName(e.zone);
-    switch (e.type) {
-      case "placed": return z ? `${name} on the ${z}` : name;
-      case "removed": return z ? `${name} from the ${z}` : name;
-      case "moved": {
-        const from = zoneName(e.from_zone);
-        if (from && z) return `${name} from the ${from} to the ${z}`;
-        return z ? `${name} to the ${z}` : name;
-      }
-      case "verified": return z ? `${name} is still on the ${z}` : `${name} is still there`;
-      case "corrected": return `${name}: ${e.note || "memory updated"}`;
-      default: return name;
-    }
-  }
-
-  function eventRow(e, linkObject) {
-    const t = EVENT_TYPES[e.type] || { text: e.type || "Event", icon: "•" };
+  function eventRow(e) {
+    const t = EVENT_TYPES[e.type] || { text: e.type || "Seen", icon: "•" };
     const img = stableUrl(e.crop_url);
-    const thumb = img
-      ? `<img src="${esc(img)}" alt="" loading="lazy">`
-      : `<span class="thumb-empty" aria-hidden="true"></span>`;
-    const sentence = esc(eventSentence(e));
-    const body = linkObject && e.object_id
-      ? `<button class="linklike" type="button" data-action="open" data-id="${esc(e.object_id)}" data-fkey="ev-${esc(e.id)}">${sentence}</button>`
-      : sentence;
-    const conf = typeof e.confidence === "number" ? ` · ${Math.round(e.confidence * 100)}% sure` : "";
+    const thumb = img ? `<img src="${esc(img)}" alt="" loading="lazy">` : `<span class="thumb-empty" aria-hidden="true"></span>`;
     return `<li>${thumb}<div>
-      <p class="ev-line"><span class="ev-type ev-${esc(e.type)}"><span aria-hidden="true">${t.icon}</span>${esc(t.text)}</span>${body}</p>
-      <p class="ev-time">${timeTag(e.ts)} · ${esc(clock(e.ts))}${esc(conf)}${e.note && e.type !== "corrected" ? ` · ${esc(e.note)}` : ""}</p>
+      <p class="ev-line"><span class="ev-type ev-${esc(e.type)}"><span aria-hidden="true">${t.icon}</span>${esc(t.text)}</span>${esc(eventSentence(e))}</p>
+      <p class="ev-time">${timeTag(e.ts)} · ${esc(clock(e.ts))}</p>
     </div></li>`;
   }
 
-  function renderEvents() {
-    const list = $("#events-list");
-    if (!state.events.length) {
-      setHtml(list, `<li class="empty-row"><p class="muted">No activity yet.</p></li>`);
-      return;
-    }
-    setHtml(list, state.events.map((e) => eventRow(e, true)).join(""));
-  }
-
-  // ---------- Alerts ----------
-
-  function renderAlerts() {
-    const list = $("#alerts-list");
-    if (!state.alerts.length) {
-      setHtml(list, `<li class="empty">No alerts. All calm.</li>`);
-      return;
-    }
-    const sorted = state.alerts.slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));
-    setHtml(list, sorted.map((a) => {
-      const kind = a.kind === "door_essentials" ? "Leaving without essentials" : (a.kind || "Alert");
-      return `<li class="alert-item"><p class="alert-msg">${esc(a.message || kind)}</p>
-        <p class="ev-time">${esc(kind)} · ${timeTag(a.ts)}</p></li>`;
-    }).join(""));
-  }
-
-  // ---------- Caregiver: approvals and routines ----------
+  // ---------- Routines, approvals, alerts ----------
 
   function renderApprovals() {
     const list = $("#approvals-list");
     const pending = state.approvals.filter((a) => !a.status || a.status === "pending");
     if (!pending.length) {
-      setHtml(list, `<li class="empty">Nothing waiting.</li>`);
+      setHtml(list, `<li class="empty">Nothing waiting for you.</li>`);
       return;
     }
     setHtml(list, pending.map((a) => `
       <li>
-        <p><strong>Notify caregiver?</strong></p>
+        <p><strong>Tell the carer?</strong></p>
         <p>${esc(a.message)}</p>
         ${a.reason ? `<p class="muted small">Why: ${esc(a.reason)}</p>` : ""}
         <p class="ev-time">Asked ${timeTag(a.created)}</p>
         <div class="approval-actions">
-          <button class="btn btn-small btn-primary" type="button" data-action="approve" data-id="${esc(a.id)}" data-fkey="ap-${esc(a.id)}">Approve and send</button>
+          <button class="btn btn-small btn-primary" type="button" data-action="approve" data-id="${esc(a.id)}" data-fkey="ap-${esc(a.id)}">Yes, tell them</button>
           <button class="btn btn-small" type="button" data-action="deny" data-id="${esc(a.id)}" data-fkey="dn-${esc(a.id)}">Don't send</button>
         </div>
       </li>`).join(""));
@@ -942,7 +1729,7 @@
   function renderRoutines() {
     const list = $("#routines-list");
     if (!state.routines.length) {
-      setHtml(list, `<li class="empty">No routines yet. Add one below, for example morning pills.</li>`);
+      setHtml(list, `<li class="empty">No routines yet. For example: morning pills, picked up between 8 and 9.</li>`);
       return;
     }
     setHtml(list, state.routines.map((r) => {
@@ -954,7 +1741,7 @@
           <strong>${esc(r.name || "Routine")}</strong>
           <span class="status-chip ${cls}">${esc(text)}</span>
         </div>
-        <p class="muted small">Watching ${esc(obj ? labelOf(obj) : "an object")} · ${esc(r.start)}–${esc(r.end)} (${esc(r.tz)})</p>
+        <p class="muted small">Watching ${esc(obj ? labelOf(obj) : "a thing")} · ${esc(r.start)}–${esc(r.end)}</p>
         <p class="ev-time">Last checked ${timeTag(r.last_checked)}</p>
         <div class="routine-actions">
           <button class="btn btn-small" type="button" data-action="check" data-id="${esc(r.id)}" data-fkey="ck-${esc(r.id)}">Check now</button>
@@ -969,7 +1756,7 @@
     const objs = state.objects.slice().sort((a, b) => labelOf(a).localeCompare(labelOf(b)));
     const html = objs.length
       ? objs.map((o) => `<option value="${esc(o.id)}">${esc(labelOf(o))} — ${esc(whereText(o).toLowerCase())}</option>`).join("")
-      : `<option value="" disabled selected>No objects remembered yet</option>`;
+      : `<option value="" disabled selected>Nothing remembered yet</option>`;
     if (sel._html === html) return;
     const prev = sel.value;
     sel.innerHTML = html;
@@ -977,12 +1764,38 @@
     if (prev && objs.some((o) => o.id === prev)) sel.value = prev;
   }
 
+  function renderAlerts() {
+    const list = $("#alerts-list");
+    if (!state.alerts.length) {
+      setHtml(list, `<li class="empty">No alerts. All calm.</li>`);
+      return;
+    }
+    const sorted = state.alerts.slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    setHtml(list, sorted.map((a) => {
+      const kind = a.kind === "door_essentials" ? "Leaving without important things"
+        : a.kind === "caregiver_notified" ? "Carer told" : "Alert";
+      return `<li><p class="alert-msg">${esc(a.message || kind)}</p><p class="ev-time">${esc(kind)} · ${timeTag(a.ts)}</p></li>`;
+    }).join(""));
+  }
+
+  async function decideApproval(button) {
+    const decision = button.getAttribute("data-action") === "approve" ? "approve" : "deny";
+    button.disabled = true;
+    try {
+      await api(`api/approvals/${encodeURIComponent(button.getAttribute("data-id"))}`, { method: "POST", body: { decision } });
+      toast(decision === "approve" ? "Done. The carer has been told." : "Okay, nothing was sent.");
+      refreshState();
+    } catch {
+      button.disabled = false;
+    }
+  }
+
   // ---------- Ask + agent job ----------
 
   function setAskBusy(busy) {
     const btn = $("#ask-btn");
     btn.disabled = busy;
-    btn.textContent = busy ? "Asking…" : "Ask";
+    btn.textContent = busy ? "Looking…" : "Ask";
     $("#ask-input").setAttribute("aria-busy", busy ? "true" : "false");
   }
 
@@ -994,22 +1807,38 @@
     try {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const d = await api("api/ask", { method: "POST", body: { question: q, tz } });
-      startJob(d.job_id, q);
+      startJob(d.job_id, q, "ask");
     } catch {
       setAskBusy(false);
     }
   }
 
-  function startJob(id, label) {
-    if (!id) { setAskBusy(false); toast("The assistant didn't start. Please try again."); return; }
+  function jobEls() {
+    return state.jobTarget === "dialog"
+      ? { status: $("#jd-status"), card: $("#jd-answer"), list: $("#jd-trace"), tools: null }
+      : { status: $("#job-status"), card: $("#answer-card"), list: $("#trace-list"), tools: $("#answer-tools") };
+  }
+
+  function startJob(id, label, target) {
+    if (!id) { setAskBusy(false); toast("iCamFind couldn't start looking. Please try again."); return; }
     stopJob();
+    state.jobTarget = target;
     state.job = { id, status: "running", question: label };
     state.steps = [];
     state.openSteps = new Set();
     state.jobStarted = Date.now();
-    $("#job-area").hidden = false;
-    $("#trace").open = true;
-    setAskBusy(true);
+    const els = jobEls();
+    els.card.hidden = true;
+    setHtml(els.list, "");
+    if (target === "ask") {
+      $("#job-area").hidden = false;
+      $("#trace").open = false;
+      setAskBusy(true);
+    } else {
+      $("#job-dialog-title").textContent = label;
+      openDialog($("#job-dialog"));
+      $("#job-dialog-close").focus();
+    }
     renderJob();
     pollJob();
   }
@@ -1048,7 +1877,7 @@
     stopJob();
     setAskBusy(false);
     const job = state.job;
-    if (job && job.status === "done" && job.answer && $("#auto-read").checked && !state.spokenJobs.has(job.id)) {
+    if (state.jobTarget === "ask" && job && job.status === "done" && job.answer && $("#auto-read").checked && !state.spokenJobs.has(job.id)) {
       state.spokenJobs.add(job.id);
       speak(job.answer);
     }
@@ -1059,17 +1888,17 @@
   function renderJob() {
     const job = state.job;
     if (!job) return;
-    const status = $("#job-status");
+    const { status } = jobEls();
     const q = esc(job.question || "");
     if (job.status === "running" || !job.status) {
-      status.innerHTML = `<span class="spinner" aria-hidden="true"></span> Working on “${q}”…`;
+      status.innerHTML = `<span class="spinner" aria-hidden="true"></span> Looking into “${q}”…`;
     } else if (job.status === "done") {
       const secs = job.created ? Math.max(1, Math.round(lastStepTs() - job.created)) : null;
-      status.innerHTML = `<span aria-hidden="true">✓</span> Answered “${q}”${secs ? ` in ${secs} s` : ""}`;
+      status.innerHTML = `<span aria-hidden="true">✓</span> Answered${secs ? ` in ${secs} seconds` : ""}`;
     } else if (job.status === "timeout") {
-      status.innerHTML = `<span aria-hidden="true">…</span> Still working on “${q}”. I stopped waiting after 2 minutes; check Recent activity shortly.`;
+      status.innerHTML = `Still working on it. Check back in a minute.`;
     } else {
-      status.innerHTML = `<span aria-hidden="true">!</span> Something went wrong with “${q}”.`;
+      status.innerHTML = `Something went wrong with “${q}”.`;
     }
     renderAnswer();
     renderTrace();
@@ -1083,26 +1912,25 @@
 
   function renderAnswer() {
     const job = state.job;
-    const card = $("#answer-card");
-    const tools = $("#answer-tools");
     if (!job) return;
+    const { card, tools } = jobEls();
     if (job.status === "error") {
       const errStep = state.steps.slice().reverse().find((s) => s.kind === "error");
-      const msg = job.answer || (errStep && errStep.text) || "The assistant couldn't finish. Please try again.";
+      const msg = job.answer || (errStep && errStep.text) || "iCamFind couldn't finish. Please try again.";
       card.className = "answer-card no-image is-error";
       setHtml(card, `<div><p class="answer-text">${esc(msg)}</p></div>`);
       card.hidden = false;
-      tools.hidden = true;
+      if (tools) tools.hidden = true;
       return;
     }
     if (job.status !== "done" || !job.answer) {
       card.hidden = true;
-      tools.hidden = true;
+      if (tools) tools.hidden = true;
       return;
     }
     const obj = job.object_id ? state.objects.find((o) => o.id === job.object_id) : null;
     const img = obj ? stableUrl(obj.crop_url) : "";
-    const meta = obj ? `${whereText(obj)} · last seen ${relTime(obj.last_seen)} (${clock(obj.last_seen)})` : "";
+    const meta = obj ? `${whereText(obj)} · seen ${relTime(obj.last_seen)} (${clock(obj.last_seen)})` : "";
     card.className = `answer-card${img ? "" : " no-image"}`;
     setHtml(card, `
       ${img ? `<img src="${esc(img)}" alt="Photo of ${esc(labelOf(obj))}">` : ""}
@@ -1112,7 +1940,7 @@
         ${obj ? `<p><button class="btn btn-small" type="button" data-action="open" data-id="${esc(obj.id)}" data-fkey="ans-open">See its history</button></p>` : ""}
       </div>`);
     card.hidden = false;
-    tools.hidden = !("speechSynthesis" in window);
+    if (tools) tools.hidden = !("speechSynthesis" in window);
   }
 
   // Pair each tool_call with the tool_result that follows it so the trace reads as one step per action.
@@ -1150,7 +1978,7 @@
     if (!item.done) return "working…";
     if (out === null || out === undefined) return "";
     if (typeof out !== "object") return String(out).slice(0, 140);
-    if (out.error) return `Problem: ${out.error}`;
+    if (out.error) return out.error === "camera offline" ? "The camera is offline" : `Problem: ${out.error}`;
     const pct = (v) => (typeof v === "number" ? ` (${Math.round(v * 100)}% match)` : "");
     switch (tool) {
       case "list_objects": {
@@ -1169,17 +1997,14 @@
         if (out.found === true) return `Found it${zoneName(out.zone) ? ` on the ${out.zone}` : ""}${pct(out.confidence)}`;
         if (out.found === false) return "Not found anywhere in view";
         break;
-      case "update_object_status":
-        return "Memory updated";
-      case "speak_on_device":
-        return out.spoken === false ? "Couldn't speak on the device" : "Message spoken on the device";
+      case "update_object_status": return "Memory updated";
+      case "speak_on_device": return out.spoken === false ? "Couldn't speak" : "Said it out loud";
       case "request_caregiver_notification":
-        if (out.status === "sent") return "Caregiver notified";
-        return out.status ? `Approval ${out.status}` : "Approval requested";
-      default:
-        break;
+        if (out.status === "sent") return "Carer told";
+        return "Waiting for your OK";
+      case "record_routine_status": return "Noted";
+      default: break;
     }
-    if (typeof out.similarity === "number") return pct(out.similarity).trim();
     return "";
   }
 
@@ -1192,10 +2017,10 @@
   }
 
   function renderTrace() {
-    const list = $("#trace-list");
+    const { list } = jobEls();
     const items = traceItems(state.steps);
     if (!items.length) {
-      setHtml(list, `<li class="step-thought"><p class="step-thought-text">Starting…</p></li>`);
+      setHtml(list, `<li><p class="step-thought-text">Starting…</p></li>`);
       return;
     }
     const html = items.map((it) => {
@@ -1204,21 +2029,21 @@
       const imgHtml = img ? `<img src="${esc(img)}" alt="Camera picture used in this step" loading="lazy">` : "";
       const time = it.ts ? `<time class="step-time" datetime="${new Date(it.ts * 1000).toISOString()}">${esc(clock(it.ts))}</time>` : "";
       if (it.kind === "thought") {
-        return `<li class="step-thought"><p class="step-thought-text">${esc(it.text)}</p>${imgHtml}</li>`;
+        return `<li><p class="step-thought-text">${esc(it.text)}</p>${imgHtml}</li>`;
       }
       if (it.kind === "answer" || it.kind === "error") {
         const name = it.kind === "answer" ? "Answer" : "Problem";
-        return `<li class="step-${it.kind}"><p><span class="step-name">${name}</span> ${time}</p><p>${esc(it.text)}</p>${imgHtml}</li>`;
+        return `<li><p><span class="step-name">${name}</span> ${time}</p><p>${esc(it.text)}</p>${imgHtml}</li>`;
       }
-      const name = TOOL_NAMES[it.tool] || it.tool || "Step";
+      const name = TOOL_NAMES[it.tool] || "Step";
       const sum = summarize(it);
       const open = state.openSteps.has(String(it.n)) ? " open" : "";
-      return `<li class="step-tool">
+      return `<li>
         <details data-n="${n}"${open}>
           <summary data-fkey="st-${n}"><span class="step-name">${esc(name)}</span>${sum ? `<span class="step-summary">— ${esc(sum)}</span>` : ""}${time}</summary>
-          <div class="step-body">${imgHtml}${jsonBlock("What I sent", it.input)}${jsonBlock("What came back", it.output)}</div>
+          <div class="step-body">${jsonBlock("Details sent", it.input)}${jsonBlock("Details received", it.output)}</div>
         </details>
-        ${imgHtml && !open ? `<div class="step-body">${imgHtml}</div>` : ""}
+        ${imgHtml ? `<div class="step-body">${imgHtml}</div>` : ""}
       </li>`;
     }).join("");
     setHtml(list, html);
@@ -1257,7 +2082,7 @@
         if (e.results[e.results.length - 1].isFinal) heard = true;
       };
       rec.onerror = (e) => {
-        toast(e.error === "not-allowed" ? "Microphone permission is blocked for this page." : "I didn't catch that. Please try again.");
+        toast(e.error === "not-allowed" ? "Microphone access is blocked for this page." : "I didn't catch that. Please try again.");
       };
       rec.onend = () => {
         rec = null;
@@ -1270,14 +2095,41 @@
     });
   }
 
-  // ---------- Settings ----------
+  // ---------- Menu and settings ----------
 
   function applyLargeText(on) {
     document.documentElement.classList.toggle("large", on);
     $("#large-text-toggle").setAttribute("aria-pressed", on ? "true" : "false");
   }
 
+  function setMenu(open) {
+    $("#menu-panel").hidden = !open;
+    $("#menu-btn").setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) {
+      const first = $("#menu-panel .menu-item");
+      if (first) first.focus();
+    }
+  }
+
   // ---------- Event wiring ----------
+
+  function bindOpenLinks(el) {
+    el.addEventListener("click", (e) => {
+      const b = e.target.closest('[data-action="open"]');
+      if (b) openObject(b.getAttribute("data-id"));
+    });
+  }
+
+  function bindRoomMarkers(el) {
+    el.addEventListener("click", (e) => {
+      const m = e.target.closest(".marker");
+      if (m) openObject(m.getAttribute("data-id"));
+    });
+    el.addEventListener("keydown", (e) => {
+      const m = e.target.closest && e.target.closest(".marker");
+      if (m && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openObject(m.getAttribute("data-id")); }
+    });
+  }
 
   function bind() {
     $("#login-btn").addEventListener("click", async () => {
@@ -1291,93 +2143,94 @@
       }
     });
 
+    window.addEventListener("hashchange", () => { if (!$("#app").hidden) showView(viewFromHash(), true); });
+
+    // Menu
+    $("#menu-btn").addEventListener("click", (e) => { e.stopPropagation(); setMenu($("#menu-panel").hidden); });
+    document.addEventListener("click", (e) => {
+      if (!$("#menu-panel").hidden && !e.target.closest(".menu")) setMenu(false);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !$("#menu-panel").hidden) { setMenu(false); $("#menu-btn").focus(); }
+    });
     $("#logout-btn").addEventListener("click", signOut);
-
-    $("#household-select").addEventListener("change", (e) => switchHousehold(e.target.value));
-
-    $("#camera-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const name = $("#camera-name").value.trim();
-      if (!name) return;
-      const btn = e.target.querySelector('button[type="submit"]');
-      btn.disabled = true;
-      const hh = state.household;
-      try {
-        const d = await api("api/devices", { method: "POST", body: { name } });
-        if (state.household === hh) {
-          $("#camera-name").value = "";
-          showCameraToken(d);
-          refreshState();
-        }
-      } catch { /* toast shown */ } finally {
-        btn.disabled = false;
-      }
-    });
-    $("#copy-token-btn").addEventListener("click", () => copyText($("#camera-token").value, "Token"));
-    $("#copy-command-btn").addEventListener("click", () => copyText($("#camera-command").textContent, "Command"));
-    $("#camera-token").addEventListener("focus", (e) => e.target.select());
-    $("#token-done-btn").addEventListener("click", () => {
-      hideCameraToken();
-      $("#camera-name").focus();
-    });
-
     $("#large-text-toggle").addEventListener("click", () => {
       const on = !document.documentElement.classList.contains("large");
       applyLargeText(on);
       store.set("icamfind.large", on ? "1" : "0");
     });
+    $("#auto-read").addEventListener("change", (e) => store.set("icamfind.autoread", e.target.checked ? "1" : "0"));
 
+    $("#household-select").addEventListener("change", (e) => switchHousehold(e.target.value));
+
+    // Ask
     $("#ask-form").addEventListener("submit", (e) => {
       e.preventDefault();
       ask($("#ask-input").value);
     });
-
-    document.querySelectorAll(".chip[data-q]").forEach((chip) => {
+    $$(".chip[data-q]").forEach((chip) => {
       chip.addEventListener("click", () => ask(chip.getAttribute("data-q")));
     });
-
-    $("#auto-read").addEventListener("change", (e) => store.set("icamfind.autoread", e.target.checked ? "1" : "0"));
     $("#read-aloud-btn").addEventListener("click", () => { if (state.job) speak(state.job.answer); });
 
-    // Remember which trace steps the user expanded across re-renders (toggle does not bubble).
-    $("#trace-list").addEventListener("toggle", (e) => {
-      const d = e.target;
-      if (!(d instanceof HTMLDetailsElement) || !d.dataset.n) return;
-      if (d.open) state.openSteps.add(d.dataset.n); else state.openSteps.delete(d.dataset.n);
-      $("#trace-list")._html = null; // force next render to rebuild with the new open state
-    }, true);
-
-    $("#snapshot-btn").addEventListener("click", async () => {
-      try {
-        await api("api/snapshot", { method: "POST" });
-        toast("Asking the camera for a fresh picture…");
-        const again = () => { state.snapForce = true; refreshState(); };
-        setTimeout(again, 4000);
-        setTimeout(again, 9000);
-      } catch { /* toast shown */ }
+    // Remember which trace steps were expanded across re-renders (toggle does not bubble).
+    [$("#trace-list"), $("#jd-trace")].forEach((list) => {
+      list.addEventListener("toggle", (e) => {
+        const d = e.target;
+        if (!(d instanceof HTMLDetailsElement) || !d.dataset.n) return;
+        if (d.open) state.openSteps.add(d.dataset.n); else state.openSteps.delete(d.dataset.n);
+        list._html = null; // force the next render to rebuild with the new open state
+      }, true);
     });
 
-    // Room markers
-    const room = $("#room-view");
-    room.addEventListener("click", (e) => {
-      const m = e.target.closest(".marker");
-      if (m) openObject(m.getAttribute("data-id"));
-    });
-    room.addEventListener("keydown", (e) => {
-      const m = e.target.closest && e.target.closest(".marker");
-      if (m && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openObject(m.getAttribute("data-id")); }
+    $("#banners").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-action]");
+      if (!b) return;
+      const action = b.getAttribute("data-action");
+      if (action === "dismiss") dismiss(b.getAttribute("data-key"));
+      else if (action === "approve" || action === "deny") decideApproval(b);
+      else if (action === "go-camera") go("camera");
+      else if (action === "go-home") { const h = ownHome(); if (h) switchHousehold(h.id); }
+      else if (action === "go-demo") { const h = demoHome(); if (h) switchHousehold(h.id); }
     });
 
-    // Filters
-    document.querySelectorAll(".seg[data-filter]").forEach((btn) => {
+    [$("#recent-strip"), $("#answer-card"), $("#jd-answer")].forEach(bindOpenLinks);
+    [$("#demo-room"), $("#things-room")].forEach(bindRoomMarkers);
+
+    // Camera
+    $("#cam-setup-btn").addEventListener("click", () => openWizard("setup"));
+    $("#cam-pause").addEventListener("click", pauseOrResume);
+    $("#cam-places").addEventListener("click", () => { if (cam.stream) openWizard("edit"); });
+    $("#cam-reset").addEventListener("click", () => {
+      if (cam.engine && typeof cam.engine.resetBackground === "function") {
+        cam.engine.resetBackground();
+        toast("Okay. Learning the room again, keep still for a few seconds.");
+      }
+    });
+    $("#cam-forget").addEventListener("click", forgetThisCamera);
+    $("#demo-switch-btn").addEventListener("click", () => { const h = ownHome(); if (h) switchHousehold(h.id); });
+    $("#demo-refresh-btn").addEventListener("click", requestSnapshot);
+    $("#things-refresh-btn").addEventListener("click", requestSnapshot);
+    $("#pair-btn").addEventListener("click", openPairDialog);
+    $("#pair-close").addEventListener("click", () => closeDialog($("#pair-dialog")));
+    $("#pair-copy").addEventListener("click", () => copyText($("#pair-command").textContent, "Command"));
+
+    // Wizard
+    $("#wiz-next").addEventListener("click", wizNext);
+    $("#wiz-back").addEventListener("click", () => setWizStep(Math.max(1, wiz.step - 1)));
+    $("#wiz-close").addEventListener("click", closeWizard);
+    $("#wizard").addEventListener("close", onWizardClosed);
+    $("#wiz-camera-select").addEventListener("change", (e) => turnOnCamera(e.target.value));
+    bindDrawing();
+
+    // Things: filters and cards
+    $$(".seg[data-filter]").forEach((btn) => {
       btn.addEventListener("click", () => {
         state.filter = btn.getAttribute("data-filter");
-        document.querySelectorAll(".seg[data-filter]").forEach((b) => b.setAttribute("aria-pressed", b === btn ? "true" : "false"));
+        $$(".seg[data-filter]").forEach((b) => b.setAttribute("aria-pressed", b === btn ? "true" : "false"));
         renderObjects(true);
       });
     });
-
-    // Objects grid actions
     const grid = $("#objects-grid");
     grid.addEventListener("click", async (e) => {
       const el = e.target.closest("[data-action]");
@@ -1389,7 +2242,7 @@
         const o = state.objects.find((x) => x.id === id);
         if (!o) return;
         const ok = await updateObject(id, { essential: !o.essential });
-        if (ok) { renderObjects(true); toast(!o.essential ? "Marked as essential." : "No longer essential."); }
+        if (ok) { renderObjects(true); toast(!o.essential ? "Marked as important." : "No longer marked as important."); }
       } else if (action === "rename") {
         state.editingId = id;
         renderObjects(true);
@@ -1409,7 +2262,7 @@
       if (ok) {
         state.editingId = null;
         renderObjects(true);
-        const btn = grid.querySelector(`[data-fkey="rename-${window.CSS && CSS.escape ? CSS.escape(id) : id}"]`);
+        const btn = grid.querySelector(fkeySel(`rename-${id}`));
         if (btn) btn.focus();
         toast(`Renamed to “${label}”.`);
       }
@@ -1421,30 +2274,11 @@
       }
     });
 
-    // Anything else with data-action="open" (timeline, answer card)
-    [$("#events-list"), $("#answer-card")].forEach((el) => {
-      el.addEventListener("click", (e) => {
-        const b = e.target.closest('[data-action="open"]');
-        if (b) openObject(b.getAttribute("data-id"));
-      });
-    });
-
-    // Approvals
-    $("#approvals-list").addEventListener("click", async (e) => {
-      const b = e.target.closest("[data-action]");
-      if (!b) return;
-      const decision = b.getAttribute("data-action") === "approve" ? "approve" : "deny";
-      b.disabled = true;
-      try {
-        await api(`api/approvals/${encodeURIComponent(b.getAttribute("data-id"))}`, { method: "POST", body: { decision } });
-        toast(decision === "approve" ? "Caregiver notified." : "Okay, nothing was sent.");
-        refreshState();
-      } catch {
-        b.disabled = false;
-      }
-    });
-
     // Routines
+    $("#approvals-list").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-action]");
+      if (b) decideApproval(b);
+    });
     $("#routines-list").addEventListener("click", async (e) => {
       const b = e.target.closest("[data-action]");
       if (!b) return;
@@ -1453,10 +2287,7 @@
       if (b.getAttribute("data-action") === "check") {
         try {
           const d = await api(`api/routines/${encodeURIComponent(id)}/check`, { method: "POST" });
-          startJob(d.job_id, `Routine check: ${r ? r.name : "routine"}`);
-          $("#ask").scrollIntoView({ block: "start" });
-          $("#job-status").setAttribute("tabindex", "-1");
-          $("#job-status").focus();
+          startJob(d.job_id, `Checking: ${r ? r.name : "routine"}`, "dialog");
         } catch { /* toast shown */ }
       } else if (b.getAttribute("data-action") === "delete") {
         if (!window.confirm(`Delete the routine “${r ? r.name : ""}”?`)) return;
@@ -1467,7 +2298,6 @@
         } catch { /* toast shown */ }
       }
     });
-
     $("#routine-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const body = {
@@ -1477,7 +2307,7 @@
         end: $("#routine-end").value,
         tz: $("#routine-tz").value.trim(),
       };
-      if (!body.object_id) { toast("Pick an object for the routine first."); return; }
+      if (!body.object_id) { toast("Pick a thing to watch first."); return; }
       try {
         await api("api/routines", { method: "POST", body });
         toast("Routine saved.");
@@ -1486,16 +2316,16 @@
       } catch { /* toast shown */ }
     });
 
-    // Dialog
-    const dialog = $("#object-dialog");
-    $("#dialog-close").addEventListener("click", closeDialog);
-    dialog.addEventListener("close", onDialogClosed);
-    dialog.addEventListener("click", (e) => { if (e.target === dialog) closeDialog(); }); // backdrop click
-    dialog.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && typeof dialog.showModal !== "function") closeDialog();
+    // Sheets
+    $("#dialog-close").addEventListener("click", () => closeDialog($("#object-dialog")));
+    $("#job-dialog-close").addEventListener("click", () => closeDialog($("#job-dialog")));
+    [$("#object-dialog"), $("#job-dialog"), $("#pair-dialog")].forEach((dialog) => {
+      dialog.addEventListener("close", returnFocus);
+      dialog.addEventListener("click", (e) => { if (e.target === dialog) closeDialog(dialog); }); // backdrop
+      dialog.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && typeof dialog.showModal !== "function") closeDialog(dialog);
+      });
     });
-
-    $("#alerts-badge").addEventListener("click", () => setTimeout(() => $("#alerts").focus(), 0));
 
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden && state.auth && !$("#app").hidden) { refreshState(); refreshEvents(); }
@@ -1515,7 +2345,6 @@
     try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { /* keep UTC */ }
     $("#routine-tz").value = tz;
     $("#auto-read").checked = store.get("icamfind.autoread") === "1";
-    if (!("speechSynthesis" in window)) $("#answer-tools").hidden = true;
 
     bind();
     setupMic();

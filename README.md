@@ -23,7 +23,7 @@ overall prizes and the **Agentic Vision Award**.
 
 ## How it works (60-second version)
 
-1. **On the device (OpenCV 5):** a dual-background static-object detector notices when something
+1. **On the device (OpenCV 5, in Python or in the browser through WebAssembly):** a dual-background static-object detector notices when something
    is put down, picked up or moved. A short-term MOG2 model tracks motion and a long-term reference
    background holds memory. People are masked out using the YOLOX detector from the OpenCV Model
    Zoo, run through `cv.dnn`. Boundary-gradient analysis tells "placed" apart from "taken away".
@@ -84,24 +84,26 @@ To create a ready-made account (e.g. for judges), run
 `python scripts/create_user.py --email judges@icamfind.example`. If you pass `--caregiver-email`,
 confirm the SNS subscription email that arrives.
 
-### 2. Sign in and connect a camera
+### 2. Sign in and turn on a camera
 
 Open the web-app URL and choose **Sign in or create an account**. Every account gets a private
-**My home** and can also open the shared **Demo home**. In My home, go to **Cameras → Add a
-camera**. It shows a one-time device token and the exact command to run, for example:
+**My home** and can also open the shared **Demo home**.
 
-```bash
-cp config.example.json config.json
-python -m icamfind calibrate      # click polygons for desk / shelf / door, press m for the room map
-ICAMFIND_API_URL=https://<api> ICAMFIND_DEVICE_TOKEN=icf_... python -m icamfind run
-```
+- **Easiest: this computer's camera.** Go to **Camera → Use this computer's camera**, allow camera
+  access, and draw your places (Desk, Shelf, Door...) on the live picture. The whole OpenCV
+  pipeline then runs inside the browser through OpenCV 5.0 WebAssembly (`cloud/src/web/edge.js`).
+  Video never leaves the device; only small object photos are uploaded.
+- **Another computer or a CCTV camera.** Go to **Camera → Connect another computer**. It shows a
+  one-time code that lasts 10 minutes. On that machine:
 
-(PowerShell: `$env:ICAMFIND_API_URL='...'; $env:ICAMFIND_DEVICE_TOKEN='icf_...'; python -m icamfind run`.)
-In the preview window, `q` quits and `r` re-learns the background.
+  ```bash
+  pip install -r requirements.txt && python scripts/get_models.py
+  python -m icamfind pair K7P2-9QXA --api https://<your-app>
+  python -m icamfind run                      # or: --source rtsp://user:pass@camera/stream
+  ```
 
-A CCTV stream works as well: `python -m icamfind run --source rtsp://user:pass@camera/stream`.
-A recorded clip can stand in for a camera: `--source clips/demo.mp4`, or replay the benchmark scene with its zones: `python -m icamfind run --config config.synthetic.json`.
-Without a device token the camera runs **local-only**, still remembering and alerting.
+  Places drawn in the web app are used automatically. `python -m icamfind calibrate` is still
+  there for drawing them locally. In the preview window, `q` quits and `r` re-learns the background.
 
 ### 3. Use it
 

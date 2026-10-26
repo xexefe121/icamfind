@@ -33,12 +33,17 @@ WEB_DIR = Path(__file__).parent / "web"
 _lambda = boto3.client("lambda", region_name=store.REGION)
 
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("index.html", "text/html; charset=utf-8"),
-          "/app.js": ("app.js", "application/javascript"), "/style.css": ("style.css", "text/css")}
+          "/app.js": ("app.js", "application/javascript"), "/edge.js": ("edge.js", "application/javascript"),
+          "/style.css": ("style.css", "text/css")}
 SECURITY_HEADERS = {
     "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "x-frame-options": "DENY",
-    "content-security-policy": "default-src 'self'; img-src 'self' https: data: blob:; "
-                               "style-src 'self' 'unsafe-inline'; "
-                               f"connect-src 'self' https://*.amazoncognito.com; frame-ancestors 'none'",
+    # OpenCV.js (pinned + SRI) comes from jsDelivr and needs WebAssembly compilation.
+    "content-security-policy": "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; "
+                               "img-src 'self' https: data: blob:; media-src 'self' blob:; "
+                               "style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; "
+                               "connect-src 'self' https://*.amazoncognito.com https://cdn.jsdelivr.net; "
+                               "frame-ancestors 'none'",
+    "permissions-policy": "camera=(self), microphone=(self), geolocation=()",
 }
 
 
@@ -136,7 +141,24 @@ def post_alert(device: dict, body: dict) -> dict:
     return _resp(200, {"ok": True})
 
 
+def get_device_config(device: dict) -> dict:
+    record = store.get_device(device["id"]) or {}
+    return _resp(200, {"name": record.get("name", device.get("name")), "zones": record.get("zones_user") or [],
+                       "door_zone": record.get("door_zone_user")})
+
+
+def post_pair(body: dict) -> dict:
+    """Unauthenticated: exchange a one-time pairing code (made in the web app) for a camera token."""
+    item = store.redeem_pair_code(str(body.get("code", "")))
+    if item is None:
+        raise HttpError(400, "that code is wrong or has expired - make a new one in the web app")
+    store.set_household(item["household"])
+    device, token = store.create_device(item["name"], kind="computer")
+    return _resp(200, {"token": token, "api_url": API_URL, "device": {"id": device["id"], "name": device["name"]}})
+
+
 DEVICE_ROUTES = [
+    ("GET", r"/api/device/config", lambda d, m, b: get_device_config(d)),
     ("POST", r"/api/device/events", lambda d, m, b: post_event(d, b)),
     ("POST", r"/api/device/heartbeat", lambda d, m, b: post_heartbeat(d, b)),
     ("GET", r"/api/device/commands", lambda d, m, b: _resp(200, {"commands": store.pending_commands(d["id"])})),
@@ -172,7 +194,7 @@ def get_state(ctx: dict) -> dict:
     return _resp(200, {
         "household": ctx["household"],
         "device": device,
-        "devices": [{k: d.get(k) for k in ("id", "name", "online", "last_heartbeat")} for d in devices],
+        "devices": [{k: d.get(k) for k in ("id", "name", "kind", "online", "last_heartbeat")} for d in devices],
         "objects": [_with_urls(o) for o in store.list_objects()],
         "alerts": store.list_alerts(20),
         "approvals": store.list_approvals("pending"),
@@ -300,17 +322,54 @@ def get_devices() -> dict:
     import agent
 
     devices = store.list_devices()
-    return _resp(200, {"devices": [{"id": d["id"], "name": d.get("name"), "online": agent.device_online(d),
-                                    "last_heartbeat": d.get("last_heartbeat")} for d in devices]})
+    return _resp(200, {"devices": [{"id": d["id"], "name": d.get("name"), "kind": d.get("kind", "computer"),
+                                    "online": agent.device_online(d), "last_heartbeat": d.get("last_heartbeat")}
+                                   for d in devices]})
+
+
+def _require_owner(ctx: dict) -> None:
+    hh = ctx["household"]
+    if hh.get("demo") or hh["id"] not in ctx["user"].get("owner_of", []):
+        raise HttpError(403, "cameras can only be added to your own home")
+    if len(store.list_devices()) >= 8:
+        raise HttpError(409, "a home can have at most 8 cameras")
+
+
+def post_pair_code(ctx: dict, body: dict) -> dict:
+    _require_owner(ctx)
+    item = store.create_pair_code(str(body.get("name") or "Camera"))
+    return _resp(200, {"code": item["code"], "expires_in": 600,
+                       "command": f"python -m icamfind pair {item['code']} --api {API_URL}"})
+
+
+def _clean_zones(zones) -> list[dict]:
+    if not isinstance(zones, list) or len(zones) > 20:
+        raise HttpError(400, "zones must be a list of up to 20 places")
+    out = []
+    for z in zones:
+        name = str((z or {}).get("name", "")).strip()[:40]
+        poly = (z or {}).get("polygon")
+        if not name or not isinstance(poly, list) or not 3 <= len(poly) <= 32:
+            raise HttpError(400, "each place needs a name and 3-32 points")
+        out.append({"name": name, "polygon": [[round(float(p[0]), 1), round(float(p[1]), 1)] for p in poly]})
+    return out
+
+
+def put_zones(device_id: str, body: dict) -> dict:
+    record = store.get_device(device_id)
+    if record is None:
+        raise HttpError(404, "camera not found")
+    record["zones_user"] = _clean_zones(body.get("zones"))
+    door = body.get("door_zone")
+    record["door_zone_user"] = door if door in {z["name"] for z in record["zones_user"]} else None
+    store.put_device(record)
+    return _resp(200, {"ok": True})
 
 
 def post_device(ctx: dict, body: dict) -> dict:
-    hh = ctx["household"]
-    if hh.get("demo") or hh["id"] not in ctx["user"].get("owner_of", []):
-        raise HttpError(403, "only the owner of a private home can add cameras")
-    if len(store.list_devices()) >= 5:
-        raise HttpError(409, "a home can have at most 5 cameras")
-    device, token = store.create_device(str(body.get("name") or "Camera"))
+    _require_owner(ctx)
+    kind = "browser" if body.get("kind") == "browser" else "computer"
+    device, token = store.create_device(str(body.get("name") or "Camera"), kind=kind)
     command = (f"ICAMFIND_API_URL={API_URL} ICAMFIND_DEVICE_TOKEN={token} python -m icamfind run")
     return _resp(200, {"device": {"id": device["id"], "name": device["name"]}, "token": token,
                        "run_command": command,
@@ -332,6 +391,8 @@ USER_ROUTES = [
     ("POST", r"/api/approvals/(apr_\w+)", lambda c, m, b: post_approval(m[1], b)),
     ("GET", r"/api/devices", lambda c, m, b: get_devices()),
     ("POST", r"/api/devices", lambda c, m, b: post_device(c, b)),
+    ("POST", r"/api/devices/pair-code", lambda c, m, b: post_pair_code(c, b)),
+    ("PUT", r"/api/devices/(dev_\w+)/zones", lambda c, m, b: put_zones(m[1], b)),
 ]
 
 
@@ -378,6 +439,8 @@ def handler(event, context):
 
     try:
         body = _json(event) if method in ("POST", "PUT") else {}
+        if path == "/api/device/pair" and method == "POST":
+            return post_pair(body)
         if path.startswith("/api/device/"):
             device = authenticate_device(event)
             return _dispatch(DEVICE_ROUTES, method, path, device, body)

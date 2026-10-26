@@ -199,7 +199,23 @@ class EdgeApp:
 
     # ------------------------------------------------------------------ loop
 
+    def _apply_cloud_places(self) -> None:
+        """Use places drawn in the web app (if any) instead of the local config."""
+        res = self.uplink._get("/api/device/config")
+        zones = (res or {}).get("zones") or []
+        if not zones:
+            return
+        from .config import Zone
+
+        self.cfg.zones = [Zone(z["name"], z["polygon"]) for z in zones]
+        self.cfg.door_zone = res.get("door_zone")
+        self.geometry = RoomGeometry(self.cfg)
+        self.scene.geometry = self.geometry
+        log.info("using %d places drawn in the web app", len(zones))
+
     def run(self, max_seconds: float | None = None) -> None:
+        if self.uplink.enabled:
+            self._apply_cloud_places()
         cap = open_source(self.cfg.source)
         started = time.time()
         if self.worker:

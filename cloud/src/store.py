@@ -120,15 +120,48 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def create_device(name: str) -> tuple[dict, str]:
+def create_device(name: str, kind: str = "computer") -> tuple[dict, str]:
     import secrets
 
     token = "icf_" + secrets.token_urlsafe(32)
-    device = {"id": new_id("dev"), "name": name[:60] or "Camera", "household": HOUSEHOLD, "created": now()}
+    device = {"id": new_id("dev"), "name": name[:60] or "Camera", "kind": kind, "household": HOUSEHOLD,
+              "created": now()}
     table.put_item(Item=to_ddb({"pk": f"DEVTOKEN#{token_hash(token)}", "sk": "META", **device}))
     table.put_item(Item=to_ddb({"pk": _h(f"DEV#{device['id']}"), "sk": "META", "gsi1pk": _h("DEVICES"),
                                 "gsi1sk": device["id"], **device}))
     return device, token
+
+
+PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I confusion
+
+
+def create_pair_code(name: str, ttl: int = 600) -> dict:
+    """Short-lived one-time code that lets another computer join this home without copying a token."""
+    import secrets
+
+    raw = "".join(secrets.choice(PAIR_ALPHABET) for _ in range(8))
+    code = f"{raw[:4]}-{raw[4:]}"
+    item = {"code": code, "household": HOUSEHOLD, "name": name[:60] or "Camera", "created": now(),
+            "expires": now() + ttl, "used": False}
+    table.put_item(Item=to_ddb({"pk": f"PAIR#{code}", "sk": "META", "ttl": int(now()) + ttl, **item}))
+    return item
+
+
+def redeem_pair_code(code: str) -> dict | None:
+    """Atomically consume a pairing code; returns its item (household, name) or None."""
+    code = code.strip().upper().replace(" ", "")
+    if len(code) == 8:
+        code = f"{code[:4]}-{code[4:]}"
+    try:
+        res = table.update_item(
+            Key={"pk": f"PAIR#{code}", "sk": "META"},
+            UpdateExpression="SET used = :t",
+            ConditionExpression="attribute_exists(pk) AND used = :f AND expires > :now",
+            ExpressionAttributeValues=to_ddb({":t": True, ":f": False, ":now": now()}),
+            ReturnValues="ALL_NEW")
+    except table.meta.client.exceptions.ConditionalCheckFailedException:
+        return None
+    return clean(res["Attributes"])
 
 
 def device_for_token(token: str) -> dict | None:

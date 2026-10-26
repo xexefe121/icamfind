@@ -2,223 +2,363 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <title>iCamFind</title>
-  <meta name="description" content="iCamFind remembers where everyday things were put down, so people with memory loss and their caregivers can find them again.">
+  <meta name="description" content="iCamFind remembers where everyday things were put down, so people with memory loss and their carers can find them again.">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
 
-  <!-- Sign-in: shown until the Cognito hosted UI returns tokens -->
+  <!-- Sign-in screen -->
   <section id="login" class="login" aria-labelledby="login-title" hidden>
     <div class="login-card">
-      <div class="brand brand-lg"><span class="brand-mark" aria-hidden="true">◉</span> iCamFind</div>
-      <h1 id="login-title">Welcome</h1>
-      <p class="muted">iCamFind remembers where everyday things were put down, so you can simply ask where they are.</p>
-      <p id="login-status" class="muted" role="status" hidden></p>
+      <div class="brand brand-lg"><span class="brand-mark" aria-hidden="true"></span>iCamFind</div>
+      <h1 id="login-title">Never lose your keys again</h1>
+      <p class="muted">iCamFind watches the places where you put things down, so you can simply ask where they are.</p>
+      <p id="login-status" class="login-status" role="status" hidden></p>
       <p id="login-error" class="error-text" role="alert" hidden></p>
-      <button id="login-btn" type="button" class="btn btn-primary btn-lg btn-block" disabled>Sign in or create an account</button>
-      <p class="small muted login-note">Judges: use the account in the submission notes, or create your own — every account can explore the shared Demo home.</p>
+      <button id="login-btn" class="btn btn-primary btn-block btn-lg" type="button" disabled>Sign in or create an account</button>
+      <p class="muted small">Judges: use the account in the submission notes, or create your own. Every account can also explore the shared Demo home.</p>
     </div>
   </section>
 
-  <div id="app" hidden>
-    <header class="site-header">
-      <div class="header-inner">
-        <div class="brand"><span class="brand-mark" aria-hidden="true">◉</span> iCamFind</div>
-        <div id="household-wrap" class="household" hidden>
-          <label for="household-select" class="household-label">Home</label>
-          <select id="household-select"></select>
-          <span id="demo-badge" class="badge-demo" hidden>Demo</span>
-        </div>
-        <div class="header-status">
-          <span id="device-pill" class="pill pill-muted" role="status">Connecting…</span>
-          <a id="alerts-badge" class="pill pill-alert" href="#alerts" hidden>
-            <span aria-hidden="true">!</span> <span id="alerts-badge-text">0 alerts</span>
-          </a>
-        </div>
-        <div class="header-actions">
-          <span id="user-email" class="user-email small muted" hidden></span>
-          <button id="large-text-toggle" class="btn btn-ghost" type="button" aria-pressed="false">Larger text</button>
-          <button id="logout-btn" class="btn btn-ghost" type="button">Sign out</button>
-        </div>
+  <div id="app" class="app" hidden>
+    <!-- Top bar -->
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">iCamFind</span></div>
+      <div id="household-wrap" class="home-picker" hidden>
+        <label for="household-select" class="home-label">Home</label>
+        <select id="household-select"></select>
+        <span id="demo-badge" class="badge badge-demo" hidden>Demo</span>
       </div>
-      <div id="demo-banner" class="demo-banner" role="note" hidden>
-        <p>You're in the shared Demo home. Its camera replays a recorded room around the clock, so you can try every feature. Switch to My home to connect your own camera.</p>
+      <div class="menu">
+        <button id="menu-btn" class="btn btn-ghost menu-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="menu-panel">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          <span class="menu-btn-text">Menu</span>
+        </button>
+        <div id="menu-panel" class="menu-panel" role="group" aria-label="Settings" hidden>
+          <p id="user-email" class="menu-email" hidden></p>
+          <button id="large-text-toggle" class="menu-item" type="button" aria-pressed="false">Larger text</button>
+          <label class="menu-item menu-check"><input id="auto-read" type="checkbox"> Read answers aloud</label>
+          <button id="logout-btn" class="menu-item" type="button">Sign out</button>
+        </div>
       </div>
     </header>
 
+    <!-- Primary navigation: left rail on wide screens, bottom bar on phones -->
+    <nav class="tabs" aria-label="Main">
+      <a class="tab" href="#ask" data-view="ask">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10l-5 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><path d="M8 10h8M8 13h5"/></svg>
+        <span>Ask</span>
+      </a>
+      <a class="tab" href="#camera" data-view="camera">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/></svg>
+        <span>Camera</span>
+        <span id="tab-cam-dot" class="tab-dot" hidden></span>
+      </a>
+      <a class="tab" href="#things" data-view="things">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="9" r="4"/><path d="M11 12l8 8M15 16l2-2M17 18l2-2"/></svg>
+        <span>Things</span>
+      </a>
+      <a class="tab" href="#routines" data-view="routines">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6"/></svg>
+        <span>Routines</span>
+        <span id="tab-routines-dot" class="tab-dot tab-dot-alert" hidden></span>
+      </a>
+    </nav>
+
     <main id="main" tabindex="-1">
-      <!-- Hero: ask a question -->
-      <section id="ask" class="hero" aria-labelledby="ask-title">
-        <h1 id="ask-title" class="hero-title">What are you looking for?</h1>
-        <form id="ask-form" class="ask-form" role="search">
-          <label for="ask-input" class="visually-hidden">Ask iCamFind a question</label>
-          <input id="ask-input" name="question" type="text" autocomplete="off"
-                 placeholder="Where are my keys?" maxlength="300" required>
-          <button id="mic-btn" class="btn btn-icon" type="button" aria-pressed="false" hidden>
-            <span aria-hidden="true">🎤</span><span class="visually-hidden" id="mic-label">Speak your question</span>
-          </button>
-          <button id="ask-btn" class="btn btn-primary btn-lg" type="submit">Ask</button>
-        </form>
-        <div class="chips" role="group" aria-label="Suggested questions">
-          <button class="chip" type="button" data-q="Where are my keys?">Where are my keys?</button>
-          <button class="chip" type="button" data-q="Did I take my pills today?">Did I take my pills today?</button>
-          <button class="chip" type="button" data-q="What did I put on the desk today?">What did I put on the desk today?</button>
+      <!-- ASK -->
+      <section id="view-ask" class="view view-ask" data-view="ask" aria-labelledby="ask-title" hidden>
+        <div id="banners" class="banners"></div>
+
+        <div class="ask-hero">
+          <h1 id="ask-title" class="hero-title" tabindex="-1">What are you looking for?</h1>
+          <form id="ask-form" class="ask-form" role="search">
+            <label for="ask-input" class="visually-hidden">Ask iCamFind a question</label>
+            <input id="ask-input" name="question" type="text" autocomplete="off"
+                   placeholder="Where are my keys?" maxlength="300" required>
+            <button id="mic-btn" class="btn btn-icon" type="button" aria-pressed="false" hidden>
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+              <span class="visually-hidden" id="mic-label">Speak your question</span>
+            </button>
+            <button id="ask-btn" class="btn btn-primary btn-lg" type="submit">Ask</button>
+          </form>
+          <div class="chips" role="group" aria-label="Suggested questions">
+            <button class="chip" type="button" data-q="Where are my keys?">Where are my keys?</button>
+            <button class="chip" type="button" data-q="Did I take my pills today?">Did I take my pills today?</button>
+            <button class="chip" type="button" data-q="What did I put on the desk today?">What's on the desk?</button>
+          </div>
         </div>
 
         <div id="job-area" class="job-area" hidden>
-          <div id="job-status" class="job-status" role="status"></div>
           <div id="answer-card" class="answer-card" aria-live="polite" hidden></div>
-          <div class="answer-tools" id="answer-tools" hidden>
-            <button id="read-aloud-btn" class="btn" type="button">Read aloud</button>
-            <label class="switch">
-              <input id="auto-read" type="checkbox">
-              <span>Read answers aloud automatically</span>
-            </label>
+          <p id="job-status" class="job-status" role="status"></p>
+          <div id="answer-tools" class="answer-tools" hidden>
+            <button id="read-aloud-btn" class="btn btn-small" type="button">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10H4zM16 9a4 4 0 0 1 0 6"/></svg>
+              Read aloud
+            </button>
           </div>
-          <details id="trace" class="trace" open>
+          <details id="trace" class="trace">
             <summary>How I found this</summary>
-            <ol id="trace-list" class="trace-list"></ol>
+            <ol id="trace-list" class="trace-list" aria-live="polite"></ol>
           </details>
         </div>
+
+        <section class="recent" aria-labelledby="recent-title">
+          <h2 id="recent-title" class="section-title">Recently</h2>
+          <ul id="recent-strip" class="recent-strip"></ul>
+        </section>
       </section>
 
-      <div class="layout">
-        <!-- Room view -->
-        <section id="room" class="card span-2" aria-labelledby="room-title">
-          <div class="card-head">
-            <h2 id="room-title">Room view</h2>
-            <button id="snapshot-btn" class="btn" type="button">Refresh camera view</button>
-          </div>
-          <div id="room-view" class="room-view">
-            <p class="placeholder">No camera view yet. Press “Refresh camera view” once the camera is online.</p>
-          </div>
-          <p class="muted small">People are blurred on the device before any picture leaves the house.</p>
-        </section>
+      <!-- CAMERA -->
+      <section id="view-camera" class="view view-camera" data-view="camera" aria-labelledby="camera-title" hidden>
+        <h1 id="camera-title" class="view-title" tabindex="-1">Camera</h1>
 
-        <!-- Alerts -->
-        <section id="alerts" class="card" aria-labelledby="alerts-title" tabindex="-1">
-          <h2 id="alerts-title">Alerts</h2>
-          <ul id="alerts-list" class="plain-list"></ul>
-        </section>
-
-        <!-- Objects -->
-        <section id="objects" class="card span-3" aria-labelledby="objects-title">
-          <div class="card-head">
-            <h2 id="objects-title">Things I remember</h2>
-            <div class="segmented" role="group" aria-label="Filter things">
-              <button type="button" class="seg" data-filter="all" aria-pressed="true">All</button>
-              <button type="button" class="seg" data-filter="present" aria-pressed="false">On surfaces</button>
-              <button type="button" class="seg" data-filter="removed" aria-pressed="false">Taken</button>
+        <!-- This computer is the camera -->
+        <div id="cam-live" class="cam-live" hidden>
+          <div id="cam-frame" class="video-frame">
+            <video id="cam-video" playsinline muted autoplay></video>
+            <canvas id="cam-overlay" class="video-overlay" aria-hidden="true"></canvas>
+            <div id="cam-paused-cover" class="video-cover" hidden>
+              <p>Camera paused</p>
             </div>
           </div>
-          <div id="objects-grid" class="objects-grid"></div>
-        </section>
-
-        <!-- Timeline -->
-        <section id="timeline" class="card span-2" aria-labelledby="timeline-title">
-          <h2 id="timeline-title">Recent activity</h2>
-          <ol id="events-list" class="timeline"></ol>
-        </section>
-
-        <!-- Caregiver -->
-        <section id="caregiver" class="card" aria-labelledby="caregiver-title">
-          <h2 id="caregiver-title">Caregiver</h2>
-
-          <h3>Waiting for approval</h3>
-          <ul id="approvals-list" class="plain-list"></ul>
-
-          <h3>Daily routines</h3>
-          <ul id="routines-list" class="plain-list"></ul>
-
-          <details class="routine-new">
-            <summary>Add a routine</summary>
-            <form id="routine-form" class="stack">
-              <label for="routine-name">Name</label>
-              <input id="routine-name" type="text" required maxlength="60" placeholder="Morning pills">
-              <label for="routine-object">Object to watch</label>
-              <select id="routine-object" required></select>
-              <div class="row">
-                <div>
-                  <label for="routine-start">From</label>
-                  <input id="routine-start" type="time" required value="08:00">
-                </div>
-                <div>
-                  <label for="routine-end">Until</label>
-                  <input id="routine-end" type="time" required value="09:00">
-                </div>
-              </div>
-              <label for="routine-tz">Time zone</label>
-              <input id="routine-tz" type="text" required>
-              <button class="btn btn-primary" type="submit">Save routine</button>
-            </form>
-          </details>
-        </section>
-
-        <!-- Cameras -->
-        <section id="cameras" class="card span-3" aria-labelledby="cameras-title">
-          <div class="card-head">
-            <h2 id="cameras-title">Cameras</h2>
-          </div>
-          <div class="cameras-grid">
-            <div>
-              <h3 class="visually-hidden">Connected cameras</h3>
-              <ul id="cameras-list" class="plain-list"></ul>
+          <div class="cam-bar">
+            <p id="cam-status" class="cam-status" role="status"><span class="status-dot"></span><span id="cam-status-text">Starting…</span></p>
+            <div class="cam-actions">
+              <button id="cam-pause" class="btn" type="button">Pause</button>
+              <button id="cam-places" class="btn" type="button">Change places</button>
+              <button id="cam-reset" class="btn" type="button">Start over</button>
             </div>
-            <div>
-              <p id="camera-demo-note" class="muted" hidden>This home's camera is a replay running in the cloud: the same OpenCV pipeline watches a recorded room around the clock, so questions, live camera checks and routines all work here. To connect a real camera, switch to My home.</p>
-              <p id="camera-member-note" class="muted" hidden>Only the owner of this home can add cameras.</p>
+          </div>
+          <p class="muted small">Video stays on this computer. iCamFind only saves small photos of the things you put down. Keep this page open while you want the room watched.
+            <button id="cam-forget" class="linklike small" type="button">Stop using this computer as a camera</button></p>
+        </div>
 
-              <div id="camera-add" hidden>
-                <h3>Add a camera</h3>
-                <p class="muted small">Run iCamFind on a computer next to a webcam or CCTV camera. Name the camera, then copy the command it gives you.</p>
-                <form id="camera-form" class="stack">
-                  <label for="camera-name">Camera name</label>
-                  <input id="camera-name" type="text" required maxlength="60" placeholder="Living room">
-                  <button class="btn btn-primary" type="submit">Create camera token</button>
+        <!-- Not set up yet -->
+        <div id="cam-setup" class="setup-card" hidden>
+          <div class="setup-art" aria-hidden="true">
+            <svg viewBox="0 0 120 90"><rect x="8" y="12" width="104" height="66" rx="10" class="art-screen"/><circle cx="60" cy="45" r="16" class="art-lens"/><circle cx="60" cy="45" r="7" class="art-dot"/><rect x="40" y="80" width="40" height="5" rx="2.5" class="art-base"/></svg>
+          </div>
+          <h2 class="setup-title">Use this computer's camera</h2>
+          <p class="setup-text">Point your laptop or webcam at the places where you usually put things, such as a desk, a table or a shelf. iCamFind remembers what you put down and where.</p>
+          <p id="cam-setup-error" class="error-text" role="alert" hidden></p>
+          <button id="cam-setup-btn" class="btn btn-primary btn-lg" type="button">Use this computer's camera</button>
+          <p class="muted small">Takes about a minute. Nothing to install.</p>
+        </div>
+
+        <!-- Demo home -->
+        <div id="cam-demo" class="demo-card" hidden>
+          <p class="demo-text">This shared home is watched by a camera in the cloud that replays a recorded room, so anyone can try iCamFind. Switch to My home to use your own camera.</p>
+          <div id="demo-room" class="room-view" aria-label="Demo camera view"></div>
+          <div class="demo-actions">
+            <button id="demo-switch-btn" class="btn btn-primary" type="button">Switch to My home</button>
+            <button id="demo-refresh-btn" class="btn" type="button">Refresh picture</button>
+          </div>
+        </div>
+
+        <section id="cam-others" class="cam-others" aria-labelledby="others-title">
+          <h2 id="others-title" class="section-title">Other cameras in this home</h2>
+          <ul id="cameras-list" class="cameras-list"></ul>
+          <button id="pair-btn" class="linklike" type="button">Connect another computer or a CCTV camera</button>
+        </section>
+      </section>
+
+      <!-- THINGS -->
+      <section id="view-things" class="view view-things" data-view="things" aria-labelledby="things-title" hidden>
+        <div class="view-head">
+          <h1 id="things-title" class="view-title" tabindex="-1">Things</h1>
+          <div class="seg-group" role="group" aria-label="Show">
+            <button class="seg" type="button" data-filter="all" aria-pressed="true">All</button>
+            <button class="seg" type="button" data-filter="present" aria-pressed="false">On surfaces</button>
+            <button class="seg" type="button" data-filter="removed" aria-pressed="false">Picked up</button>
+          </div>
+        </div>
+        <details id="things-room-wrap" class="room-wrap" hidden>
+          <summary>Room view</summary>
+          <div id="things-room" class="room-view"></div>
+          <button id="things-refresh-btn" class="btn btn-small" type="button">Refresh picture</button>
+        </details>
+        <div id="objects-grid" class="objects-grid" aria-live="polite"></div>
+      </section>
+
+      <!-- ROUTINES -->
+      <section id="view-routines" class="view view-routines" data-view="routines" aria-labelledby="routines-title" hidden>
+        <h1 id="routines-title" class="view-title" tabindex="-1">Routines</h1>
+        <p class="muted">For carers: iCamFind checks that important things, like a pill bottle, are picked up on time. It reminds the person first, and asks you before telling anyone.</p>
+        <div class="routines-layout">
+          <div class="routines-main">
+            <section aria-labelledby="approvals-title" class="card">
+              <h2 id="approvals-title" class="card-title">Waiting for your OK</h2>
+              <ul id="approvals-list" class="plain-list"></ul>
+            </section>
+            <section aria-labelledby="routines-list-title" class="card">
+              <h2 id="routines-list-title" class="card-title">Daily routines</h2>
+              <ul id="routines-list" class="plain-list"></ul>
+              <details class="add-routine">
+                <summary class="btn btn-small">Add a routine</summary>
+                <form id="routine-form" class="routine-form">
+                  <label for="routine-name">Name</label>
+                  <input id="routine-name" type="text" maxlength="80" placeholder="Morning pills" required>
+                  <label for="routine-object">Thing to watch</label>
+                  <select id="routine-object" required></select>
+                  <div class="time-row">
+                    <div><label for="routine-start">From</label><input id="routine-start" type="time" value="08:00" required></div>
+                    <div><label for="routine-end">Until</label><input id="routine-end" type="time" value="09:00" required></div>
+                  </div>
+                  <label for="routine-tz">Time zone</label>
+                  <input id="routine-tz" type="text" required>
+                  <button class="btn btn-primary" type="submit">Save routine</button>
                 </form>
-              </div>
-
-              <div id="camera-token-panel" class="token-panel" role="region" aria-labelledby="camera-token-title" hidden>
-                <h3 id="camera-token-title" tabindex="-1">Camera “<span id="camera-token-name"></span>” is ready</h3>
-                <p class="warning"><strong>This token is shown once. Anyone with it can send events to this home.</strong></p>
-                <label for="camera-token">Camera token</label>
-                <div class="token-row">
-                  <input id="camera-token" type="text" readonly spellcheck="false" autocomplete="off">
-                  <button id="copy-token-btn" class="btn" type="button">Copy</button>
-                </div>
-                <p class="field-label" id="camera-command-label">Command to run on the camera computer</p>
-                <pre class="command" aria-labelledby="camera-command-label"><code id="camera-command"></code></pre>
-                <div class="token-actions">
-                  <button id="copy-command-btn" class="btn" type="button">Copy command</button>
-                  <button id="token-done-btn" class="btn btn-primary" type="button">Done, I saved it</button>
-                </div>
-              </div>
-            </div>
+              </details>
+            </section>
           </div>
-        </section>
-      </div>
+          <section aria-labelledby="alerts-title" class="card routines-side">
+            <h2 id="alerts-title" class="card-title">Alerts</h2>
+            <ul id="alerts-list" class="plain-list"></ul>
+          </section>
+        </div>
+      </section>
     </main>
-
-    <footer class="site-footer">
-      <p class="muted small">iCamFind runs vision on the local device with OpenCV 5 and keeps its memory on AWS.</p>
-    </footer>
   </div>
 
-  <!-- Object detail dialog -->
-  <dialog id="object-dialog" aria-labelledby="dialog-title">
-    <div class="dialog-head">
-      <h2 id="dialog-title">Object</h2>
-      <button id="dialog-close" class="btn btn-ghost" type="button" aria-label="Close">✕</button>
+  <!-- Object details -->
+  <dialog id="object-dialog" class="sheet" aria-labelledby="dialog-title">
+    <div class="sheet-head">
+      <h2 id="dialog-title">Thing</h2>
+      <button id="dialog-close" class="btn btn-ghost btn-icon" type="button" aria-label="Close">✕</button>
     </div>
-    <div id="dialog-body" class="dialog-body"></div>
+    <div id="dialog-body" class="sheet-body"></div>
   </dialog>
 
+  <!-- Routine check / agent run -->
+  <dialog id="job-dialog" class="sheet" aria-labelledby="job-dialog-title">
+    <div class="sheet-head">
+      <h2 id="job-dialog-title">Routine check</h2>
+      <button id="job-dialog-close" class="btn btn-ghost btn-icon" type="button" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-body">
+      <div id="jd-answer" class="answer-card" aria-live="polite" hidden></div>
+      <p id="jd-status" class="job-status" role="status"></p>
+      <h3 class="small-title">How I checked</h3>
+      <ol id="jd-trace" class="trace-list"></ol>
+    </div>
+  </dialog>
+
+  <!-- Camera setup wizard -->
+  <dialog id="wizard" class="wizard" aria-labelledby="wiz-title">
+    <div class="wiz-head">
+      <ol class="wiz-steps" aria-label="Steps">
+        <li data-step="1">Camera</li><li data-step="2">Places</li><li data-step="3">Done</li>
+      </ol>
+      <button id="wiz-close" class="btn btn-ghost btn-icon" type="button" aria-label="Close setup">✕</button>
+    </div>
+
+    <div class="wiz-body">
+      <!-- Step 1 -->
+      <div id="wiz-step-1" class="wiz-step">
+        <h2 id="wiz-title" class="wiz-title" tabindex="-1">Let's turn on your camera</h2>
+        <p class="wiz-text">Point it at the places where you put things down. Video stays on this computer. iCamFind only keeps small photos of the things themselves.</p>
+        <div class="video-frame wiz-video">
+          <video id="wiz-video" playsinline muted autoplay></video>
+          <div id="wiz-video-placeholder" class="video-cover">
+            <svg viewBox="0 0 24 24" class="icon icon-xl" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/></svg>
+            <p>Your camera picture will appear here</p>
+          </div>
+        </div>
+        <div id="wiz-cam-pick" class="field-row" hidden>
+          <label for="wiz-camera-select">Camera</label>
+          <select id="wiz-camera-select"></select>
+        </div>
+        <p id="wiz-cam-error" class="error-text" role="alert" hidden></p>
+        <p id="wiz-ready" class="muted small" role="status"></p>
+      </div>
+
+      <!-- Step 2 -->
+      <div id="wiz-step-2" class="wiz-step" hidden>
+        <h2 class="wiz-title" tabindex="-1">Show me your places</h2>
+        <p class="wiz-text">Drag a box over each place where you put things, then give it a name. Add the door too if you can see it, and iCamFind will remind you if you leave without your keys.</p>
+        <div class="places-layout">
+          <div class="video-frame draw-frame" id="draw-frame">
+            <video id="draw-video" playsinline muted autoplay></video>
+            <canvas id="draw-canvas" class="draw-canvas" aria-label="Camera picture. Drag to mark a place."></canvas>
+          </div>
+          <div class="places-side">
+            <div id="name-panel" class="name-panel" hidden>
+              <p class="name-q" id="name-q">What is this place?</p>
+              <div class="chips" role="group" aria-labelledby="name-q">
+                <button class="chip" type="button" data-place="Desk">Desk</button>
+                <button class="chip" type="button" data-place="Table">Table</button>
+                <button class="chip" type="button" data-place="Kitchen bench">Kitchen bench</button>
+                <button class="chip" type="button" data-place="Shelf">Shelf</button>
+                <button class="chip" type="button" data-place="Bedside">Bedside</button>
+                <button class="chip chip-door" type="button" data-place="Door">Door</button>
+              </div>
+              <form id="place-custom" class="place-custom">
+                <label for="place-name" class="visually-hidden">Other name</label>
+                <input id="place-name" type="text" maxlength="30" placeholder="Or type a name">
+                <button class="btn btn-small btn-primary" type="submit">Add</button>
+                <button id="place-cancel" class="btn btn-small" type="button">Cancel</button>
+              </form>
+            </div>
+            <h3 class="small-title">Your places</h3>
+            <ul id="places-list" class="places-list"></ul>
+            <button id="place-whole" class="linklike small" type="button">Can't drag? Use the whole picture as one place</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div id="wiz-step-3" class="wiz-step" hidden>
+        <h2 class="wiz-title" tabindex="-1">All set!</h2>
+        <ul class="tips">
+          <li><strong>Keep the camera still</strong> and pointed at your surfaces.</li>
+          <li><strong>Good light helps.</strong> Turn on a lamp at night.</li>
+          <li><strong>Put something down</strong> and move your hand away. After about 2 seconds iCamFind remembers it.</li>
+          <li><strong>Ask any time:</strong> "Where are my keys?"</li>
+        </ul>
+        <p id="wiz-finish-error" class="error-text" role="alert" hidden></p>
+      </div>
+    </div>
+
+    <div class="wiz-foot">
+      <button id="wiz-back" class="btn" type="button" hidden>Back</button>
+      <button id="wiz-next" class="btn btn-primary btn-lg" type="button">Turn on camera</button>
+    </div>
+  </dialog>
+
+  <!-- Connect another computer -->
+  <dialog id="pair-dialog" class="sheet sheet-small" aria-labelledby="pair-title">
+    <div class="sheet-head">
+      <h2 id="pair-title">Connect another camera</h2>
+      <button id="pair-close" class="btn btn-ghost btn-icon" type="button" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-body">
+      <p>Use this for a second computer next to another room, or a computer connected to a CCTV camera.</p>
+      <p id="pair-loading" class="muted" role="status">Making a code…</p>
+      <div id="pair-ready" hidden>
+        <p class="muted small">Your code</p>
+        <p id="pair-code" class="pair-code" aria-live="polite"></p>
+        <p>On that computer, install iCamFind and run:</p>
+        <div class="copy-row">
+          <code id="pair-command" class="cmd"></code>
+          <button id="pair-copy" class="btn btn-small" type="button">Copy</button>
+        </div>
+        <p class="muted small">First time on that computer? Install Python, then run: pip install iCamFind requirements (see the setup guide).</p>
+        <p class="muted small">The code works for 10 minutes.</p>
+      </div>
+      <p id="pair-error" class="error-text" role="alert" hidden></p>
+    </div>
+  </dialog>
+
+  <div id="event-toast" class="event-toast" role="status" aria-live="polite" hidden></div>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-  <script src="app.js"></script>
+  <script src="edge.js" defer></script>
+  <script src="app.js" defer></script>
 </body>
 </html>

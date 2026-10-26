@@ -5,18 +5,18 @@ Record at 1080p. Use a screen recorder for the web app and a phone or second cam
 Keep the room bright and evenly lit, and put the camera high, looking down at a desk, a shelf and
 the door.
 
-## Before recording (10 minutes)
+## Before recording (5 minutes)
 
-1. Open the web app and sign in. Create your own account; the shared Demo home is fine for
-   rehearsal, but record in **My home**.
-2. In **My home**, go to **Cameras → Add a camera** ("Living room") and copy the PowerShell command.
-3. `python -m icamfind calibrate`. Draw zones named `desk`, `shelf`, `side table` and `door`,
-   and mark `door` as the exit.
-4. Paste the command from step 2. It runs `python -m icamfind run` with your camera's token.
-   Keep the web app open next to it, with large-text mode on.
-5. Props: keys on a keyring, wallet, glasses case, pill bottle. Matte, distinct objects at least
+1. Open the web app on a laptop and sign in with your own account (**My home**).
+2. Point the laptop camera (or a USB webcam) down at a desk and a shelf, with good, even light.
+3. Go to **Camera → Use this computer's camera**, allow access, then draw the places: Desk, Shelf
+   and Door. OpenCV 5 now runs in the browser. Wait for "Watching the room".
+4. Props: keys on a keyring, wallet, glasses case, pill bottle. Matte, distinct objects at least
    about 3 cm across in the image work best.
-6. Star the keys and wallet as essentials, or let Claude flag them automatically.
+5. Star the keys and wallet as essentials, or let Claude flag them automatically.
+
+For a fixed CCTV or a second computer, use **Camera → Connect another computer**, then run
+`python -m icamfind pair <code> --api <url>` and `python -m icamfind run` on that machine.
 
 Optional shot: switch the Home selector to **Demo home** to show that anyone can try iCamFind
 online. A cloud replay camera feeds it around the clock.
@@ -26,7 +26,7 @@ online. A cloud replay camera feeds it around the clock.
 | Time | Shot | What to say (suggested) |
 |---|---|---|
 | 0:00-0:20 | Team on camera | "We're team iCamFind. For people living with dementia or ADHD, and for their carers, 'where did I put it?' is a daily frustration. We built a camera that remembers for you." (If you quote a statistic here, cite its source on screen.) |
-| 0:20-0:50 | Put keys on desk, wallet on shelf. Cut to the app: both appear with photos, zones and names ("house keys"). | "OpenCV 5 runs on this laptop. It notices objects being put down, waits until your hand leaves, then sends only a small, privacy-filtered photo to AWS." |
+| 0:20-0:50 | Click "Use this computer's camera", draw Desk and Shelf, put keys on the desk and the wallet on the shelf. "Remembered: house keys on the desk" pops up. | "No install: OpenCV 5 runs right here in the browser through WebAssembly. It notices objects being put down, waits until your hand leaves, then sends only a small photo to AWS. The video never leaves this laptop." |
 | 0:50-1:30 | Ask by voice: "Where are my keys?" Show the live trace: Checked memory, Looked with the camera (crop), Answer. Read-aloud plays. | "The agent doesn't just recall. It makes the camera look again right now, so the answer is current." |
 | 1:30-2:10 | Pick the keys up off camera and put them on the side table. Ask again. The trace shows Looked with the camera (empty surface), Scanned the room, found on side table, Updated memory. | "Memory said desk, but the camera saw an empty desk, so the agent scanned the whole room with feature matching, found the keys and fixed its own memory. Visual evidence changes what it does next." |
 | 2:10-2:40 | Walk to the door with the wallet still on the shelf. Laptop speaks: "Wait, your wallet on the shelf is still here." The alert appears in the app. | "Leave without your essentials and it reminds you, on device, instantly." |

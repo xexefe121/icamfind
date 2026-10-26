@@ -100,6 +100,23 @@ queue with exponential backoff syncs it. Object state (appearance, underlying su
 persists in `data/objects/`, so memory survives restarts. Without cloud settings the device runs
 local-only, still remembering and still giving door alerts through text-to-speech.
 
+### 3.6 The same pipeline in the browser (OpenCV 5.0 WebAssembly)
+
+`cloud/src/web/edge.js` ports the scene memory, re-identification, verify/scan and uplink to
+**OpenCV 5.0.0 compiled to WebAssembly** (`@techstark/opencv-js@5.0.0-release.1`, pinned with
+Subresource Integrity), so any laptop, tablet or phone running the web app can be the camera.
+There is no install: the user clicks **Use this computer's camera** and draws their places on the
+live picture. Video frames are processed inside the browser tab and never uploaded.
+
+Two adaptations for the browser:
+1. No person detector runs there. Evidence is restricted to the places the user drew, so a person
+   sitting in front of a laptop is never remembered as an object, and the largest allowed object
+   is 12% of the frame.
+2. The door alert triggers on sustained motion inside the door area.
+
+The module's scene-memory core is DOM-free, so `scripts/web_engine_bench.js` replays the
+synthetic benchmark through it in Node and scores it with the same Python scorer (results in §5).
+
 ## 4. AWS deployment
 
 ### 4.1 Services and why
