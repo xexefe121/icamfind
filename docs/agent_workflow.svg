@@ -80,8 +80,8 @@
   <path class="l" d="M724,265 L784,298"/>
   <path class="l" d="M254,420 L294,420"/>
   <path class="l" d="M494,420 L534,420"/>
-  <text x="498" y="404" class="lab">untouched</text>
+  <text x="470" y="372" class="lab">untouched</text>
   <path class="l" d="M734,420 L774,420"/>
-  <text x="738" y="404" class="lab">2nd check</text>
+  <text x="712" y="372" class="lab">2nd check</text>
   <path class="l" d="M974,420 L1004,420"/>
 </svg>

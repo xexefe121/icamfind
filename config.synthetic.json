@@ -1,0 +1,13 @@
+{
+  "source": "bench/synthetic_1.mp4",
+  "device_id": "replay-cam",
+  "data_dir": "data_replay",
+  "speak": false,
+  "zones": [
+    {"name": "desk", "polygon": [[20, 250], [400, 250], [400, 470], [20, 470]]},
+    {"name": "shelf", "polygon": [[430, 60], [630, 60], [630, 200], [430, 200]]},
+    {"name": "side table", "polygon": [[430, 280], [630, 280], [630, 470], [430, 470]]},
+    {"name": "door", "polygon": [[0, 0], [150, 0], [150, 230], [0, 230]]}
+  ],
+  "door_zone": "door"
+}

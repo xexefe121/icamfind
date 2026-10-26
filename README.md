@@ -85,7 +85,7 @@ python -m icamfind run            # preview window; q quits, r re-learns the bac
 ```
 
 A CCTV stream works as well: `python -m icamfind run --source rtsp://user:pass@camera/stream`.
-A recorded clip can stand in for a camera: `--source clips/demo.mp4`.
+A recorded clip can stand in for a camera: `--source clips/demo.mp4`, or replay the benchmark scene with its zones: `python -m icamfind run --config config.synthetic.json`.
 Without `.icamfind.env` the device runs **local-only**, still remembering and alerting.
 
 ### 3. Use it

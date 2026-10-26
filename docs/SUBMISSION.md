@@ -105,6 +105,18 @@ opencv, python, numpy, amazon-web-services, aws-lambda, amazon-api-gateway, amaz
 amazon-s3, amazon-bedrock, claude, amazon-eventbridge, amazon-sns, amazon-cloudwatch,
 aws-cloudformation, javascript, html, css
 
+## Testing instructions for judges (put in the private judging notes)
+
+1. Open the live app URL below and enter the access code (given privately; it is the
+   `ICAMFIND_TOKEN` value in the team's `.icamfind.env`).
+2. The home device is a laptop with a webcam. During the judging window we can run it on request
+   for a live screen share. When it is offline, the app still answers from memory and shows the
+   camera as offline.
+3. Without our hardware, run the full pipeline against a recorded clip:
+   `python -m icamfind run --config config.synthetic.json` after `python -m icamfind benchmark --no-dnn`
+   (see README). The agent's live checks then run against that clip.
+4. Reproduce the numbers: `python -m icamfind benchmark --no-dnn` and `python scripts/ablation.py`.
+
 ## Links
 
 - Code: (repository URL)

@@ -19,7 +19,7 @@
 
   <!-- Edge -->
   <rect x="20" y="56" width="430" height="680" class="edge" rx="14"/>
-  <text x="40" y="84" class="h" fill="#0e7490">Home device (laptop / mini-PC + webcam or RTSP CCTV)</text>
+  <text x="40" y="84" class="h" fill="#0e7490">Home device (PC + webcam or RTSP CCTV)</text>
 
   <rect x="44" y="104" width="382" height="56" class="box"/>
   <text x="60" y="127" class="t">Capture</text>
@@ -112,7 +112,7 @@
 
   <!-- arrows -->
   <path class="l" d="M426,690 C470,690 470,142 514,142"/>
-  <text x="440" y="400" class="lab" transform="rotate(-90 452 400)">HTTPS: events + crops, heartbeats, command poll</text>
+  <text x="462" y="470" class="lab" transform="rotate(-90 462 470)">HTTPS: events, crops, heartbeats, command poll</text>
   <path class="l" d="M664,180 L664,200"/>
   <path class="l" d="M664,276 L664,296"/>
   <path class="l" d="M814,238 L856,256"/>
@@ -122,6 +122,6 @@
   <path class="l" d="M814,370 L856,440"/>
   <path class="l" d="M664,410 L664,390"/>
   <path class="l" d="M814,226 L856,150"/>
-  <path class="l" d="M514,520 C470,520 470,516 426,516"/>
-  <text x="434" y="508" class="lab">verify / scan</text>
+  <path class="l" d="M514,350 C470,350 470,516 426,516"/>
+  <text x="430" y="545" class="lab">verify / scan</text>
 </svg>
