@@ -16,7 +16,8 @@ overall prizes and the **Agentic Vision Award**.
 | | |
 |---|---|
 | Technical report | [docs/REPORT.md](docs/REPORT.md) |
-| Evaluation (reproducible) | [docs/EVALUATION.md](docs/EVALUATION.md), [docs/ABLATION.md](docs/ABLATION.md) |
+| Evaluation (reproducible) | [docs/EVALUATION.md](docs/EVALUATION.md), [docs/ABLATION.md](docs/ABLATION.md), [docs/BROWSER_PARITY.md](docs/BROWSER_PARITY.md) |
+| Morning-of-submission steps | [SUBMISSION_CHECKLIST.md](SUBMISSION_CHECKLIST.md) |
 | Agent workflow + traces | [docs/agent_workflow.svg](docs/agent_workflow.svg), [docs/evidence/](docs/evidence/) |
 | API contract | [docs/API.md](docs/API.md) |
 | Demo video script | [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) |
@@ -117,7 +118,10 @@ In the web app:
 ```bash
 python -m icamfind benchmark --no-dnn      # 5 seeded synthetic clips -> docs/EVALUATION.md
 python scripts/ablation.py                 # component ablation -> docs/ABLATION.md
+python scripts/browser_parity.py --opencv-js <opencv.js>   # browser engine vs Python -> docs/BROWSER_PARITY.md
 python -m pytest -q                        # unit tests
+python scripts/cloud_e2e.py                # live cloud suite (auth, tenancy, agent, routines, pairing)
+python tests/ui/e2e.py                     # web app end to end in headless Edge with a fake webcam
 python -m icamfind record --out clips/real1.mp4 --seconds 180   # real footage
 python -m icamfind annotate --video clips/real1.mp4             # label ground truth
 python -m icamfind eval --video clips/real1.mp4 --truth clips/real1.truth.json

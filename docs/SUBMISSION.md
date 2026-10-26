@@ -59,6 +59,10 @@ nothing turned what it sees into a memory you can ask.
 - **Accounts:** Amazon Cognito (hosted UI, PKCE) with an API Gateway JWT authorizer. Data is
   partitioned by household, every user also sees a shared Demo home fed by a cloud replay camera
   (Graviton EC2), and per-camera device tokens are stored as hashes.
+- **Browser camera:** any laptop or phone can be the camera. The same scene-memory pipeline runs in
+  the browser on OpenCV 5.0 WebAssembly, so video never leaves the device. Setup is: allow the
+  camera, then drag boxes over your places.
+- **"Here it is":** answers circle the object on the camera picture, and the live view pulses it.
 - **Web app:** plain HTML/JS, no build step. Voice input and read-aloud, large-text and
   high-contrast modes, fully keyboard operable.
 
@@ -75,6 +79,14 @@ nothing turned what it sees into a memory you can ask.
 - **Live end-to-end traces (docs/evidence):** recorded against the deployed stack. Examples:
   "memory said picked up, then scanned the room, found it on the desk (0.99), then corrected
   memory"; and "routine missed, then reminder, then caregiver approval requested".
+- **Browser engine parity:** the OpenCV 5.0 WebAssembly engine gives identical scores to the
+  Python pipeline on all 5 clips (docs/BROWSER_PARITY.md).
+- **Live cloud test suite:** 49/49 checks against the deployed stack (scripts/cloud_e2e.py) cover
+  auth, tenant isolation, the demo camera, Claude naming, the agent's verify, then scan, then
+  update loop, routine reminder and escalation to caregiver approval, and pairing codes.
+- **Web app end-to-end suite:** Playwright drives headless Microsoft Edge with a fake webcam
+  (tests/ui) through sign-in, the camera wizard, place drawing, asking, the "Here it is" view,
+  Things, Routines, pairing, reload/resume, sign-out, accessibility checks and mobile layout.
 - **Failure cases:** listed in docs/EVALUATION.md and the report.
 
 ## Challenges we ran into

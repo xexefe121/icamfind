@@ -203,7 +203,8 @@
   }
 
   function labelOf(o) {
-    return (o && (o.label || o.local_label)) || "Unnamed thing";
+    const name = (o && (o.label || o.local_label)) || "";
+    return name && name.toLowerCase() !== "object" ? name : "Unnamed thing";
   }
 
   function plural(n, word) {
@@ -604,8 +605,8 @@
 
   function switchHousehold(id) {
     if (!id || id === state.household) return;
-    stopBrowserCamera();
-    cam.paused = false;
+    // A running camera keeps watching its own home while you look at another one.
+    if (cam.engine && cam.household && cam.household !== id && camConfig(id)) stopBrowserCamera();
     state.household = id;
     store.set(HOME_KEY, id);
     resetHouseholdState();
@@ -956,11 +957,11 @@
       const pts = Array.isArray(z.polygon) ? z.polygon : [];
       if (pts.length < 3) return "";
       const points = pts.map((p) => `${Number(p[0])},${Number(p[1])}`).join(" ");
-      const cx = pts.reduce((s, p) => s + Number(p[0]), 0) / pts.length;
-      const cy = pts.reduce((s, p) => s + Number(p[1]), 0) / pts.length;
+      const lx = Math.min(...pts.map((p) => Number(p[0]))) + font * 0.4;
+      const ly = Math.min(...pts.map((p) => Number(p[1]))) + font * 1.15;
       const cls = z.name === doorZone ? "zone-shape zone-door" : "zone-shape";
       return `<polygon class="${cls}" points="${esc(points)}"><title>${esc(z.name)}</title></polygon>` +
-        `<text class="zone-label" x="${cx}" y="${cy}" font-size="${font}" text-anchor="middle">${esc(z.name)}</text>`;
+        `<text class="zone-label" x="${lx}" y="${ly}" font-size="${font}" text-anchor="start">${esc(z.name)}</text>`;
     }).join("");
     const markers = state.objects
       .filter((o) => o.status !== "removed" && Array.isArray(o.bbox) && o.bbox.length === 4)
@@ -1091,7 +1092,7 @@
         doorZone: cfg.doorZone || null,
         essentials: ESSENTIALS,
         onEvent: (ev) => { showEventToast(ev); refreshSoon(); },
-        onStatus: (s) => { if (state.household === hh) setCamStatus(s || {}); },
+        onStatus: (s) => { cam.status = s || {}; if (state.household === hh) renderCamStatus(); else renderTabDots(); },
         onAlert: (a) => { if (a && a.message) toast(a.message); refreshSoon(); },
       });
       cam.household = hh;
@@ -1156,6 +1157,7 @@
     if (ev.type === "removed") text = `<strong>Picked up:</strong> ${esc(label)}${z ? ` from the ${esc(z)}` : ""}`;
     else if (ev.type === "moved") text = `<strong>Moved:</strong> ${esc(label)}${z ? ` to the ${esc(z)}` : ""}`;
     else text = `<strong>Remembered:</strong> ${esc(label)}${z ? ` on the ${esc(z)}` : ""}`;
+    if (cam.household && cam.household !== state.household) text = `${esc(householdName(cam.household))} · ${text}`;
     const img = safeDataImage(ev.cropDataUrl);
     const el = $("#event-toast");
     el.innerHTML = `${img ? `<img src="${esc(img)}" alt="">` : ""}<span>${text}</span>`;
@@ -1530,7 +1532,7 @@
         if (wiz.ready) await wiz.ready;
         if (!wiz.loaded) await window.ICamEdge.load();
       }
-      const d = await api("api/devices", { method: "POST", body: { name: "This computer", kind: "browser" } });
+      const d = await api("api/devices", { method: "POST", body: { name: thisComputerName(), kind: "browser" } });
       const id = d.device && d.device.id;
       const secret = d.token;
       if (!id || !secret) throw new Error("setup");
@@ -1557,6 +1559,16 @@
       next.disabled = false;
       next.textContent = "Start watching";
     }
+  }
+
+  function thisComputerName() {
+    const ua = navigator.userAgent || "";
+    const os = /iPhone|iPad/.test(ua) ? "iPhone or iPad" : /Android/.test(ua) ? "Android"
+      : /Mac OS X/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /CrOS/.test(ua) ? "Chromebook"
+        : /Linux/.test(ua) ? "Linux" : "computer";
+    const br = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome"
+      : /Safari\//.test(ua) ? "Safari" : "browser";
+    return `${br} on ${os === "computer" ? "this computer" : os}`;
   }
 
   // ---------- Connect another computer ----------
@@ -1850,6 +1862,7 @@
       $("#job-area").hidden = false;
       $("#trace").open = false;
       setAskBusy(true);
+      scrollIntoViewIfNeeded($("#job-area"));
     } else {
       $("#job-dialog-title").textContent = label;
       openDialog($("#job-dialog"));
@@ -1857,6 +1870,13 @@
     }
     renderJob();
     pollJob();
+  }
+
+  function scrollIntoViewIfNeeded(el) {
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    if (r.top >= 0 && r.top < window.innerHeight * 0.25) return;
+    el.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
   }
 
   function stopJob() {
@@ -1896,6 +1916,7 @@
     const refreshed = refreshState();
     refreshEvents();
     const herePromise = job && job.status === "done" ? startHereForJob(job, refreshed) : Promise.resolve(null);
+    if (state.jobTarget === "ask") scrollIntoViewIfNeeded($("#job-area"));
     if (state.jobTarget === "ask" && job && job.status === "done" && job.answer && $("#auto-read").checked && !state.spokenJobs.has(job.id)) {
       state.spokenJobs.add(job.id);
       // Wait for the circled picture (at most 4 s) so the spoken answer can point to it.

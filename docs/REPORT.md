@@ -190,7 +190,13 @@ camera):
   SHA-256 hash. The demo replay camera's token sits in AWS Secrets Manager and is read by the EC2
   instance role.
 - **IAM:** least privilege through SAM policy templates per function, plus Bedrock invoke actions.
-- **Web app hardening:** strict security headers and CSP. All server strings are escaped in the UI.
+- **Web app hardening:**
+  - security headers: `nosniff`, `DENY` framing, no referrer, and a permissions policy that allows
+    the camera and microphone only for this origin;
+  - CSP: scripts only from this origin and the pinned jsDelivr OpenCV build, loaded with
+    Subresource Integrity. `'wasm-unsafe-eval'` and `'unsafe-eval'` are allowed because OpenCV.js
+    (WebAssembly + embind) needs them;
+  - all server strings are escaped in the UI.
 - **Reproducible deploy:** pinned Python dependencies (`requirements*.txt`), the model checksum in
   `scripts/get_models.py`, and a one-command deploy. The Lambda package is pure Python with no
   bundled wheels.
@@ -247,7 +253,7 @@ Full per-clip table and failure list: [EVALUATION.md](EVALUATION.md).
 - F1 1.0 / 0.923 / 1.0 / 1.0 / 0.966 per clip;
 - the same failure events;
 - identity kept 20/20;
-- 27-33 ms per frame median.
+- 27-52 ms per frame median in Node (the higher figures were measured while other test suites ran).
 
 In a real browser (headless Edge with the benchmark room as a fake webcam, against the deployed
 cloud):
@@ -266,7 +272,26 @@ cloud):
 same format (see README). Real-footage results are reported in the video. We expect lower scores
 than on the synthetic benchmark, for the reasons in §6.
 
-### 5.4 Agent evaluation
+### 5.4 System tests
+- **Live cloud suite** (`scripts/cloud_e2e.py`, 49 checks, all passing against the deployed stack):
+  - anonymous, forged-JWT and bad device-token requests are rejected;
+  - one home cannot read another's objects (404) or select it (403);
+  - the demo camera is online and answers live checks;
+  - a test camera's event is named by Claude ("house key") and flagged essential;
+  - the agent verifies present keys live, and escalates to a room scan once the camera reports the
+    desk empty;
+  - routines go to a spoken reminder, then a caregiver approval, and an approval cannot be reused;
+  - pairing codes work, are single-use, and tolerate case and dashes.
+- **Web app suite** (`tests/ui/e2e.py`): Playwright with headless Microsoft Edge, a fake webcam
+  replaying the benchmark room, and a mocked backend implementing `docs/API.md`. It covers sign-in
+  (PKCE), tab navigation, the camera wizard and place drawing, engine events, asking with the "Here
+  it is" picture, the demo home, Things, Routines and approvals, pairing, reload and resume,
+  sign-out, accessibility names and the 390 px mobile layout.
+  - It found and fixed 11 UI issues.
+  - One of them was critical: production CSP blocked OpenCV.js, whose embind needs
+    `'unsafe-eval'`. After the fix, OpenCV 5.0.0 loads on the live site in about 1.3 s.
+
+### 5.5 Agent evaluation
 End-to-end task success is visible in the traces. On the deployed stack with Haiku 4.5:
 - **Locate questions:** 4/4 correct (2 on Opus 4.6 during development, 2 on Haiku 4.5), 7-13 s
   end to end.

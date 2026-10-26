@@ -233,6 +233,14 @@ class EdgeApp:
         fps = 0.0
         last = time.time()
         hold_until, last_raw = 0.0, None
+        marker = Path(self.cfg.replay_marker) if is_file and self.cfg.replay_marker else None
+        if marker and marker.exists():
+            # Already replayed once: resume on the final scene instead of replaying the whole clip.
+            cap.set(cv.CAP_PROP_POS_FRAMES, max(0, int(cap.get(cv.CAP_PROP_FRAME_COUNT)) - 1))
+            ok, last_raw = cap.read()
+            if ok:
+                hold_until = time.time() + max(self.cfg.replay_pause_seconds, 1.0)
+                log.info("clip already replayed; holding its final scene")
         try:
             while True:
                 if is_file and time.time() < hold_until and last_raw is not None:
@@ -243,6 +251,10 @@ class EdgeApp:
                     if is_file and self.cfg.replay_pause_seconds > 0 and hold_until == 0.0 and last_raw is not None:
                         hold_until = time.time() + self.cfg.replay_pause_seconds
                         log.info("end of clip; holding the last frame for %.0f s", self.cfg.replay_pause_seconds)
+                        if marker:
+                            marker.parent.mkdir(parents=True, exist_ok=True)
+                            marker.write_text(time.strftime("%Y-%m-%dT%H:%M:%S"))
+                            self.scene.save(self.cfg.data_dir)
                         continue
                     log.warning("end of clip; replaying" if is_file else "frame grab failed; reconnecting")
                     cap.release()

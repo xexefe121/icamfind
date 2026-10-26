@@ -78,8 +78,11 @@ def build_demo_bundle(clip: Path, zones: list | None) -> Path:
 
         make_clip(clip.parent, int(clip.stem.split("_")[-1]) if clip.stem.split("_")[-1].isdigit() else 1)
     out = ROOT / "build" / "demo_bundle.zip"
-    config = {"source": clip.name, "device_id": "dev_demo_replay", "data_dir": "data", "speak": False,
-              "use_dnn": False, "replay_pause_seconds": 600, "zones": zones or DEMO_ZONES, "door_zone": "door"}
+    # The clip plays once, then the final scene is held: judges get a coherent home to ask about, and
+    # looping would re-remember the same items as new objects every pass.
+    config = {"source": clip.name, "device_id": "dev_demo_replay", "data_dir": "/opt/icamfind/data", "speak": False,
+              "use_dnn": False, "replay_pause_seconds": 31536000, "replay_marker": "/opt/icamfind/data/replayed.flag",
+              "zones": zones or DEMO_ZONES, "door_zone": "door"}
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted((ROOT / "icamfind").rglob("*.py")):
             z.write(f, f.relative_to(ROOT).as_posix())

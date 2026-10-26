@@ -37,8 +37,10 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("inde
           "/style.css": ("style.css", "text/css")}
 SECURITY_HEADERS = {
     "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "x-frame-options": "DENY",
-    # OpenCV.js (pinned + SRI) comes from jsDelivr and needs WebAssembly compilation.
-    "content-security-policy": "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; "
+    # OpenCV.js (pinned + SRI) comes from jsDelivr; it needs WebAssembly compilation and, for its embind
+    # bindings, runtime-generated functions ('unsafe-eval'). Script sources stay limited to this origin + that CDN.
+    "content-security-policy": "default-src 'self'; "
+                               "script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval' 'unsafe-eval'; "
                                "img-src 'self' https: data: blob:; media-src 'self' blob:; "
                                "style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; "
                                "connect-src 'self' https://*.amazoncognito.com https://cdn.jsdelivr.net; "

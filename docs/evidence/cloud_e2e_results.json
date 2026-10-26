@@ -1,0 +1,247 @@
+[
+ {
+  "check": "web app served",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "static app.js",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "static edge.js",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "static style.css",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "static config.json",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "CSP allows OpenCV.js + wasm only from pinned CDN",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "camera permission policy",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "user API rejects anonymous",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "user API rejects forged JWT",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "device API rejects bad token",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "pairing rejects wrong code",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "account has private home + demo home",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "foreign home forbidden",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "cannot add camera to demo home",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "cannot make pairing code for demo home",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "demo camera online",
+  "pass": true,
+  "detail": "Demo replay camera"
+ },
+ {
+  "check": "demo home has remembered objects",
+  "pass": true,
+  "detail": "14 objects"
+ },
+ {
+  "check": "demo snapshot available",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "demo ask completes",
+  "pass": true,
+  "detail": "Your green cushion is on the side table, right where it should be."
+ },
+ {
+  "check": "demo ask used live camera",
+  "pass": true,
+  "detail": "['list_objects', 'verify_object_live', 'final_answer']"
+ },
+ {
+  "check": "demo live check returned an image",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "create browser camera",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "invalid places rejected",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "places saved",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "camera receives places",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "event stored and named by Claude",
+  "pass": true,
+  "detail": "house key"
+ },
+ {
+  "check": "keys flagged essential",
+  "pass": true,
+  "detail": "True"
+ },
+ {
+  "check": "ask (present) completes",
+  "pass": true,
+  "detail": "Your keys are on the desk. The camera just saw them there."
+ },
+ {
+  "check": "ask (present) verified live",
+  "pass": true,
+  "detail": "['list_objects', 'verify_object_live', 'final_answer']"
+ },
+ {
+  "check": "answer names the desk",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "answer points at the object",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "ask (missing) completes",
+  "pass": true,
+  "detail": "Your keys were last on the desk about 23 seconds ago, but aren't visible there now\u2014they may be in your pocket "
+ },
+ {
+  "check": "ask (missing) escalates to room scan",
+  "pass": true,
+  "detail": "['list_objects', 'verify_object_live', 'scan_room_for_object', 'get_object_history', 'get_object_history', 'update_object_status', 'final_answer']"
+ },
+ {
+  "check": "camera executed agent commands",
+  "pass": true,
+  "detail": "{'verify_object', 'scan_for_object'}"
+ },
+ {
+  "check": "rename + essential",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "object history",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "other home cannot read it",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "timeline lists events",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "routine created",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "bad routine rejected",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "routine check 1 -> reminder spoken",
+  "pass": true,
+  "detail": "reminded ['verify_object_live', 'speak_on_device', 'record_routine_status']"
+ },
+ {
+  "check": "routine check 2 -> caregiver approval requested",
+  "pass": true,
+  "detail": "['verify_object_live', 'request_caregiver_notification', 'record_routine_status']"
+ },
+ {
+  "check": "approve sends notification",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "approval cannot be reused",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "routine delete",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "pairing code made",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "pairing code redeemed (case/dash tolerant)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "pairing code single use",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "snapshot request reaches camera",
+  "pass": true,
+  "detail": ""
+ }
+]

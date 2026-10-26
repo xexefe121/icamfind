@@ -64,6 +64,9 @@ class Config:
     model_path: str = "models/object_detection_yolox_2022nov.onnx"
     use_dnn: bool = True  # people masking + label hints; off for people-free replays on small CPUs
     replay_pause_seconds: float = 0.0  # recorded clips: hold the last frame this long before replaying
+    # Recorded clips: once this file exists the clip is not replayed again after a restart; the camera jumps
+    # to the final scene (memory is restored from data_dir), so restarts never duplicate remembered objects.
+    replay_marker: str | None = None
     speak: bool = True
 
     @classmethod

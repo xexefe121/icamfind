@@ -1364,6 +1364,7 @@
     }
 
     _publish(ev) {
+      this._statusAt = 0; // refresh the "N things remembered" status on the next frame
       const cv = this.cv;
       const crop = matToDataUrl(cv, ev.crop, "image/jpeg", 0.88, 512);
       del(ev.crop);
