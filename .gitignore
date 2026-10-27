@@ -13,3 +13,8 @@ data_e2e/
 data_replay/
 data_*/
 iCamFind-code.zip
+video/*.mp4
+video/work/
+video/rec/
+video/stock/
+video/vo/
