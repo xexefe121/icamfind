@@ -99,6 +99,8 @@ def post_event(device: dict, body: dict) -> dict:
         "local_label": ev.get("local_label", "object"), "description": "", "first_seen": ev["ts"],
         "essential": bool(ev.get("essential")), "device": device["id"],
     }
+    if obj.get("ignored"):
+        return _resp(200, {"object": None, "ignored": True})
     # Open-vocabulary naming with Claude vision the first time we see an object.
     if crop_key and ev["type"] in ("placed", "removed") and not obj.get("described"):
         try:
@@ -107,6 +109,14 @@ def post_event(device: dict, body: dict) -> dict:
             info = llm.describe_crop(base64.b64decode(body["crop_b64"]), ev.get("local_label", "object"))
             obj.update(label=info["label"], description=info["description"],
                        essential=bool(info["essential"]) or obj.get("essential", False), described=True)
+            if info["kind"] == "person":
+                # The person in front of a laptop camera is not something to remember. Keep the record (marked
+                # ignored) so later events for it are dropped too. ("background" is only advisory: plain items
+                # such as the demo home's are easily mistaken for wall texture.)
+                obj.update(ignored=True, ignored_reason=info["kind"], status="ignored", last_seen=ev["ts"],
+                           crop_key=crop_key)
+                store.put_object(obj)
+                return _resp(200, {"object": None, "ignored": True})
         except Exception as exc:  # never lose an event because labelling failed
             log.warning("describe_crop failed: %s", exc)
     obj.update(status="removed" if ev["type"] == "removed" else "present", zone=ev.get("zone"),

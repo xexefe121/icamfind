@@ -7,7 +7,8 @@
  *   node scripts/web_engine_bench.js <opencv.js> truth.json out.json frames.bin      (frames.json beside it)
  *
  * Writes {events: [{type, ts, zone, label, object_id, from_zone?}], perf: {...}} to out.json.
- * placesOnly is off so the result is directly comparable with `python -m icamfind benchmark`.
+ * placesOnly is off so the result is directly comparable with `python -m icamfind benchmark`, unless the
+ * truth file sets "places_only": true (browser Engine settings).
  */
 "use strict";
 
@@ -72,7 +73,9 @@ function frameSource(onHeader, onFrame, onEnd) {
   const cv = await loadCv();
   const truth = JSON.parse(fs.readFileSync(truthPath, "utf8"));
   const geometry = new edge.RoomGeometry(cv, truth.zones || [], truth.door_zone || null);
-  const scene = new edge.SceneMemory(cv, { placesOnly: false }, geometry);
+  // truth.places_only replays a clip with the browser Engine's settings (only the drawn places watched).
+  const cfg = truth.places_only ? { placesOnly: true, maxObjectArea: 0.25, minObjectArea: 0.0005 } : { placesOnly: false };
+  const scene = new edge.SceneMemory(cv, cfg, geometry);
   const events = [];
   const times = [];
   let fps = 15;
@@ -91,7 +94,7 @@ function frameSource(onHeader, onFrame, onEnd) {
       const evs = scene.process(rgb, t);
       times.push(Number(process.hrtime.bigint() - started) / 1e6);
       for (const ev of evs) {
-        const e = { type: ev.type, ts: ev.ts, zone: ev.zone, label: ev.label, object_id: ev.object_id };
+        const e = { type: ev.type, ts: ev.ts, zone: ev.zone, label: ev.label, object_id: ev.object_id, bbox: ev.bbox };
         if (ev.from_zone) e.from_zone = ev.from_zone;
         events.push(e);
         ev.crop.delete();

@@ -451,11 +451,13 @@
       this.startedAt = null;
       this.lastT = null;
       this.lightingSince = null;
+      this.reachingInAt = null; // last time something touching a place's border was held back
       this.motionFraction = 0.0;
       this.moving = null; // uint8 0/255 motion mask of the last frame (valid until the next process())
       this.width = 0;
       this.height = 0;
       this.placesMask = null;
+      this.placesEdge = null; // band along the border of the marked places (placesOnly)
       this._placesDirty = true;
       this.stats = { frames: 0, rebaselines: 0, events: 0 };
       this.k3 = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
@@ -484,13 +486,24 @@
 
     _ensurePlaces() {
       if (!this._placesDirty || !this.width) return;
-      del(this.placesMask);
+      del(this.placesMask, this.placesEdge);
       this.placesMask = null;
+      this.placesEdge = null;
       if (this.cfg.placesOnly) {
         // Only the places the user marked (desk, shelf...) can produce objects; the door zone is
         // used for the door-motion alert only.
         const door = this.geometry.doorZone;
         this.placesMask = this.geometry.mask(this.width, this.height, (z) => z.name !== door);
+        // Things put down lie inside a place; whatever touches its border is reaching in from outside
+        // (a person sitting in front of a laptop camera, an arm, a chair), so it is never remembered.
+        const inner = new this.cv.Mat();
+        const k5 = this.cv.getStructuringElement(this.cv.MORPH_RECT, new this.cv.Size(5, 5));
+        // Erode with a zero border so the frame edge also counts as the place's border.
+        this.cv.erode(this.placesMask, inner, k5, new this.cv.Point(-1, -1), 1, this.cv.BORDER_CONSTANT,
+          new this.cv.Scalar(0));
+        this.placesEdge = new this.cv.Mat();
+        this.cv.subtract(this.placesMask, inner, this.placesEdge);
+        del(inner, k5);
       }
       this._placesDirty = false;
     }
@@ -628,7 +641,7 @@
           ed[i] = 0;
         }
       }
-      del(personMask, differs);
+      del(personMask);
 
       // Slow drift (lighting through the day) only where nothing is happening.
       smooth.convertTo(smoothF, cv.CV_32FC3);
@@ -639,7 +652,7 @@
 
       const events = [];
       if (ex1 < 0) {
-        del(evidence, smoothF, smooth);
+        del(evidence, differs, smoothF, smooth);
         return events; // nothing is building up evidence
       }
 
@@ -670,8 +683,10 @@
         let pix = 0;
         let ready = 0;
         let maxAcc = 0;
+        let still = 0;
         let ld = labels.data32S;
         let edv = evidence.data;
+        const dnow = differs.data;
         for (let r = 0; r < bh; r++) {
           for (let x = 0, i = (by + r) * W + bx, li = (lby + r) * RW + lbx; x < bw; x++, i++, li++) {
             if (ld[li] === c && edv[i] !== 0) {
@@ -679,11 +694,15 @@
               const a = acc[i];
               if (a >= stable) ready++;
               if (a > maxAcc) maxAcc = a;
+              if (dnow[i] !== 0) still++;
             }
           }
         }
         if (!pix) continue;
         if (ready / pix < 0.85 && maxAcc < 2.5 * stable) continue; // still settling
+        // Browser (no person detector): evidence left behind by someone who has since moved away decays
+        // over a second or two; only commit what still differs from memory right now.
+        if (this.cfg.placesOnly && still < 0.5 * pix) continue;
 
         const comp = cv.Mat.zeros(this.height, W, cv.CV_8UC1);
         const cd = comp.data;
@@ -708,6 +727,11 @@
           comp.delete();
           continue;
         }
+        if (this._touchesPlaceEdge(comp, box)) {
+          this.reachingInAt = t;
+          comp.delete();
+          continue; // someone reaching into the place; not absorbed, so it is re-checked once they leave
+        }
         if (!this._isQuiet(box, t)) {
           comp.delete();
           continue; // a hand may still be on it; wait
@@ -716,7 +740,7 @@
         this._absorb(smoothF, comp);
         comp.delete();
       }
-      del(building, labels, stats, cents, evidence, smoothF, smooth);
+      del(building, labels, stats, cents, evidence, differs, smoothF, smooth);
       this.stats.events += events.length;
       return events;
     }
@@ -739,6 +763,18 @@
       }
       this.lightingSince = null;
       return false;
+    }
+
+    _touchesPlaceEdge(comp, box) {
+      if (!this.placesEdge) return false;
+      const r = new this.cv.Rect(box[0], box[1], box[2], box[3]);
+      const a = comp.roi(r);
+      const b = this.placesEdge.roi(r);
+      const both = new this.cv.Mat();
+      this.cv.bitwise_and(a, b, both);
+      const n = this.cv.countNonZero(both);
+      del(a, b, both);
+      return n > 0;
     }
 
     _isQuiet(box, t) {
@@ -994,7 +1030,7 @@
       return {
         id: obj.id, label: obj.label, local_label: obj.local_label, confidence: obj.confidence, box: obj.box,
         zone: obj.zone, status: obj.status, first_seen: obj.firstSeen, last_seen: obj.lastSeen,
-        essential: !!obj.essential, removed_at: obj.removedAt,
+        essential: !!obj.essential, removed_at: obj.removedAt, ignored: !!obj.ignored,
       };
     }
 
@@ -1004,7 +1040,7 @@
         id: meta.id, label: meta.label || "object", local_label: meta.local_label || "object",
         confidence: meta.confidence || 0, box: meta.box, zone: meta.zone || "unzoned", status: meta.status || "present",
         firstSeen: meta.first_seen, lastSeen: meta.last_seen, essential: !!meta.essential,
-        removedAt: meta.removed_at || null, appearance, under, mask,
+        removedAt: meta.removed_at || null, ignored: !!meta.ignored, appearance, under, mask,
       };
       obj.sig = this.app.signature(appearance, mask);
       const old = this.objects.get(obj.id);
@@ -1039,7 +1075,7 @@
     dispose() {
       for (const obj of this.objects.values()) this._freeObject(obj);
       this.objects.clear();
-      del(this.bgLong, this.moving, this.placesMask, this.k3, this.k7, this.k15, this.short);
+      del(this.bgLong, this.moving, this.placesMask, this.placesEdge, this.k3, this.k7, this.k15, this.short);
       this.app.dispose();
       if (this.geometry) this.geometry.dispose();
     }
@@ -1206,7 +1242,8 @@
 
     _status(state, message = "") {
       const s = { state, fps: Math.round(this.fps * 10) / 10,
-        objects: this.core ? [...this.core.objects.values()].filter((o) => o.status === "present").length : 0, message };
+        objects: this.core ? [...this.core.objects.values()].filter((o) => o.status === "present" && !o.ignored).length : 0,
+        message };
       this.lastStatus = s;
       if (this.opts.onStatus) {
         try {
@@ -1349,8 +1386,11 @@
           this._draw();
           if (started - this._statusAt > 1000) {
             this._statusAt = started;
+            const blocked = this.core.reachingInAt !== null && t - this.core.reachingInAt < 2;
             this._status(this.core.learning ? "learning" : "watching",
-              this.core.learning ? "Learning the room…" : "Watching for things being put down");
+              this.core.learning ? "Learning the room…"
+                : blocked ? "Someone is inside a place box. I'll remember things once it's clear."
+                  : "Watching for things being put down");
           }
         }
       } catch (err) {
@@ -1363,10 +1403,39 @@
       this._tickTimer = setTimeout(() => this._tick(), Math.max(0, 1000 / this.opts.targetFps - elapsed));
     }
 
+    /**
+     * The event crop cut again from the camera's full-resolution picture (the engine works on 640 px
+     * frames), so Claude can still name small things such as keys or a ring. Null if not possible.
+     */
+    _nativeCrop(ev) {
+      const v = this.video;
+      if (!v || !v.videoWidth || !ev.crop_offset || !this._frameSize) return null;
+      const kx = v.videoWidth / this._frameSize[0];
+      const ky = v.videoHeight / this._frameSize[1];
+      if (kx < 1.2) return null; // the camera is not sharper than the processing frame
+      try {
+        const sx = ev.crop_offset[0] * kx;
+        const sy = ev.crop_offset[1] * ky;
+        const sw = Math.min(v.videoWidth - sx, ev.crop.cols * kx);
+        const sh = Math.min(v.videoHeight - sy, ev.crop.rows * ky);
+        const k = Math.min(512, Math.max(256, Math.max(sw, sh))) / Math.max(sw, sh);
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(sw * k));
+        c.height = Math.max(1, Math.round(sh * k));
+        const ctx = c.getContext("2d");
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(v, sx, sy, sw, sh, 0, 0, c.width, c.height);
+        return c.toDataURL("image/jpeg", 0.9);
+      } catch (e) {
+        return null;
+      }
+    }
+
     _publish(ev) {
       this._statusAt = 0; // refresh the "N things remembered" status on the next frame
       const cv = this.cv;
-      const crop = matToDataUrl(cv, ev.crop, "image/jpeg", 0.88, 512);
+      const visible = ev.type === "placed" || ev.type === "moved";
+      const crop = (visible && this._nativeCrop(ev)) || matToDataUrl(cv, ev.crop, "image/jpeg", 0.88, 512);
       del(ev.crop);
       const payload = {};
       for (const k of ["id", "type", "object_id", "ts", "zone", "bbox", "map_xy", "label", "local_label", "confidence",
@@ -1488,7 +1557,7 @@
       }
       if (this._doorSince === null) this._doorSince = t;
       if (t - this._doorSince < 0.5 || t - this._lastDoorAlert < 45) return;
-      const left = [...this.core.objects.values()].filter((o) => o.status === "present" && o.essential);
+      const left = [...this.core.objects.values()].filter((o) => o.status === "present" && o.essential && !o.ignored);
       if (!left.length) return;
       this._lastDoorAlert = t;
       const names = left.slice(0, 3).map((o) => `your ${o.label} on the ${o.zone}`).join(", ");
@@ -1529,6 +1598,15 @@
           this.queue.shift();
           this._saveQueue();
           const obj = res && res.object;
+          const evId = item.event && item.event.object_id;
+          if (res && res.ignored && this.core && this.core.objects.has(evId)) {
+            // Claude saw a person or a bit of wall, not a thing. Keep tracking it (so its "picked up" is
+            // matched) but never count it, draw it or warn about it.
+            const local = this.core.objects.get(evId);
+            local.ignored = true;
+            local.essential = false;
+            this._scheduleSave();
+          }
           if (obj && obj.id && this.core && this.core.objects.has(obj.id)) {
             const local = this.core.objects.get(obj.id);
             if (obj.label) local.label = obj.label;
@@ -1622,7 +1700,7 @@
       ctx.setLineDash([]);
       const spotlit = this._highlight && performance.now() < this._highlight.until ? this._highlight.id : null;
       for (const o of this.core.objects.values()) {
-        if (o.status !== "present" || o.id === spotlit) continue;
+        if (o.status !== "present" || o.ignored || o.id === spotlit) continue;
         const [x, y, w, h] = o.box;
         ctx.strokeStyle = o.essential ? "#fbbf24" : "#4ade80";
         ctx.strokeRect(x * sx, y * sy, w * sx, h * sy);

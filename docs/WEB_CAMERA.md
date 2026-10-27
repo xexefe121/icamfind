@@ -63,6 +63,13 @@ ICamEdge.drawSpotlight(ctx, [x, y, w, h], W, H, label, pulse = 1, px = 1); // sa
   - verify and scan, using ORB + RANSAC homography and multi-scale `matchTemplate`.
 
   Keep the same thresholds and comments explaining them.
+- **Browser-only guards (`placesOnly`, no person detector):** only the drawn places produce objects;
+  a candidate that touches the border of a place is someone reaching in (typically the person sitting
+  in front of a laptop camera) and is held back without being absorbed, and the status line says so;
+  a candidate is committed only while most of it still differs from memory, so evidence left behind
+  by someone who has moved away is not remembered. Crops of placed or moved objects are cut again from
+  the camera's full-resolution picture so Claude can name small things. The cloud asks Claude whether
+  a crop mainly shows a person; such objects are marked `ignored` and never listed.
 - **Zones:** point-in-polygon at the bottom-centre (`cv.pointPolygonTest`), same rules as `geometry.py`.
 - **Uplink:** same JSON as the Python edge (`docs/API.md` device routes), with header
   `x-icamfind-device-token`:

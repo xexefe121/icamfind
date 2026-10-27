@@ -80,7 +80,11 @@ def text_of(response: dict) -> str:
 
 
 def describe_crop(jpeg: bytes, local_label: str) -> dict:
-    """Open-vocabulary label for an object crop: {label, description, essential}."""
+    """Open-vocabulary label for an object crop: {label, description, essential, kind}.
+
+    kind is "object" for a thing that can be put down, "person" when the crop mainly shows someone (a laptop
+    camera often sees the person in front of it), "background" for walls, windows or furniture.
+    """
     response = create(
         max_tokens=300,
         messages=[{
@@ -89,20 +93,26 @@ def describe_crop(jpeg: bytes, local_label: str) -> dict:
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                              "data": base64.standard_b64encode(jpeg).decode()}},
                 {"type": "text", "text": (
-                    "This crop shows one object a person just put down or picked up at home (the object is centred; "
-                    f"an on-device detector guessed '{local_label}'). Name it the way the person would when asking "
-                    "where it is. If it is a book, magazine, medicine box, bottle or document and you can read a "
-                    "title or product name, use it (e.g. \"The Hobbit (book)\", \"Panadol box\"); otherwise give a "
-                    "2-3 word everyday name in lowercase (e.g. \"house keys\", \"blue hardcover book\"). Reply with "
-                    "only a JSON object: {\"label\": the name, \"description\": one short sentence with colour, "
-                    "size, material and any readable text, \"essential\": true if it is keys, wallet, phone, glasses, "
-                    "medication, hearing aid or ID card, else false}.")},
+                    "A home camera noticed a change in this region (centred in the crop). Usually it is an object "
+                    f"someone put down or picked up (an on-device detector guessed '{local_label}'), but it can be a "
+                    "false alarm: part of a person (face, head, hair, hand, arm, worn clothes) or just a wall, window, "
+                    "light, shadow or fixed furniture. First decide which. Then name what is there the way the person "
+                    "would when asking where it is. If it is a book, magazine, medicine box, bottle or document and you "
+                    "can read a title or product name, use it (e.g. \"The Hobbit (book)\", \"Panadol box\"); otherwise "
+                    "give a 2-3 word everyday name in lowercase (e.g. \"house keys\", \"blue hardcover book\"). Reply "
+                    "with only a JSON object: {\"kind\": \"person\" if a face, head, hair, hand, arm or worn clothing "
+                    "fills most of the crop, \"background\" if there is only wall, window, light, shadow or fixed "
+                    "furniture and no movable item, otherwise \"object\", \"label\": the name, \"description\": one "
+                    "short sentence with colour, size, material and any readable text, \"essential\": true if it is "
+                    "keys, wallet, phone, glasses, medication, hearing aid or ID card, else false}.")},
             ],
         }],
     )
     if response.get("stop_reason") == "refusal":
-        return {"label": local_label, "description": "", "essential": False}
+        return {"label": local_label, "description": "", "essential": False, "kind": "object"}
     match = re.search(r"\{.*\}", text_of(response), re.S)
     data = json.loads(match.group(0)) if match else {}
+    kind = str(data.get("kind", "object")).lower()
     return {"label": str(data.get("label") or local_label)[:60], "description": str(data.get("description", ""))[:200],
-            "essential": bool(data.get("essential", False))}
+            "essential": bool(data.get("essential", False)),
+            "kind": kind if kind in ("object", "person", "background") else "object"}

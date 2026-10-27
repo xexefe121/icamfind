@@ -222,7 +222,7 @@ def put_object(obj: dict) -> dict:
 def list_objects(limit: int = 200) -> list[dict]:
     res = table.query(IndexName="gsi1", KeyConditionExpression=Key("gsi1pk").eq(_h("OBJECTS")),
                       ScanIndexForward=False, Limit=limit)
-    return [clean(i) for i in res.get("Items", [])]
+    return [clean(i) for i in res.get("Items", []) if not i.get("ignored")]
 
 
 def put_event(event: dict) -> dict:
