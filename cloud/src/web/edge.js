@@ -1609,6 +1609,11 @@
           }
           if (obj && obj.id && this.core && this.core.objects.has(obj.id)) {
             const local = this.core.objects.get(obj.id);
+            if (obj.label && obj.label !== local.label && this.opts.onLabel) {
+              try {
+                this.opts.onLabel({ object_id: obj.id, label: obj.label });
+              } catch (e) { /* ignore */ }
+            }
             if (obj.label) local.label = obj.label;
             local.essential = !!obj.essential || this.core._isEssential(local.label);
             this._scheduleSave();

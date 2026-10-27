@@ -18,3 +18,9 @@ video/work/
 video/rec/
 video/stock/
 video/vo/
+video/footage/
+video/demo2/feeds/
+video/demo2/rec/
+video/demo2/work/
+video/demo2/vo/
+video/demo2/*.mp4

@@ -1092,6 +1092,12 @@
         doorZone: cfg.doorZone || null,
         essentials: ESSENTIALS,
         onEvent: (ev) => { showEventToast(ev); refreshSoon(); },
+        // Claude's name for a new thing arrives a moment after the event: update the toast in place.
+        onLabel: (l) => {
+          if (eventToastEv && eventToastEv.object_id === l.object_id && !$("#event-toast").hidden) {
+            showEventToast({ ...eventToastEv, label: l.label });
+          }
+        },
         onStatus: (s) => { cam.status = s || {}; if (state.household === hh) renderCamStatus(); else renderTabDots(); },
         onAlert: (a) => { if (a && a.message) toast(a.message); refreshSoon(); },
       });
@@ -1149,8 +1155,10 @@
   }
 
   let eventToastTimer = null;
+  let eventToastEv = null;
   function showEventToast(ev) {
     if (!ev) return;
+    eventToastEv = ev;
     const label = ev.label && ev.label !== "object" ? ev.label : "something";
     const z = zoneName(ev.zone);
     let text;

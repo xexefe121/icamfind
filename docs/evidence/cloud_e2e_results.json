@@ -92,7 +92,7 @@
  {
   "check": "demo ask completes",
   "pass": true,
-  "detail": "The white plate is on the shelf, and it's there now."
+  "detail": "Your white plate is on the shelf."
  },
  {
   "check": "demo ask used live camera",
@@ -127,7 +127,7 @@
  {
   "check": "event stored and named by Claude",
   "pass": true,
-  "detail": "key"
+  "detail": "house key"
  },
  {
   "check": "keys flagged essential",
@@ -137,7 +137,7 @@
  {
   "check": "ask (present) completes",
   "pass": true,
-  "detail": "Your key is on the desk."
+  "detail": "Your house key is on the desk, where it was just placed. It's right there waiting for you."
  },
  {
   "check": "ask (present) verified live",
@@ -157,17 +157,17 @@
  {
   "check": "ask (missing) completes",
   "pass": true,
-  "detail": "I found a record of a key on your desk, but the camera shows it's not there now. You may have picked it up rec"
+  "detail": "Your house key was placed on the desk just seconds ago but isn't visible there now. Check the desk and nearby "
  },
  {
   "check": "ask (missing) escalates to room scan",
   "pass": true,
-  "detail": "['list_objects', 'verify_object_live', 'scan_room_for_object', 'update_object_status', 'get_object_history', 'final_answer']"
+  "detail": "['list_objects', 'verify_object_live', 'scan_room_for_object', 'get_object_history', 'update_object_status', 'final_answer']"
  },
  {
   "check": "camera executed agent commands",
   "pass": true,
-  "detail": "{'scan_for_object', 'verify_object'}"
+  "detail": "{'verify_object', 'scan_for_object'}"
  },
  {
   "check": "rename + essential",
